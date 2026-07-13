@@ -60,6 +60,31 @@ populate_target() {
     echo "target.txt now lists $(grep -c . "$TS_TARGET") apps (backup saved)."
 }
 
+# packages that commonly enforce Play Integrity -> "recommended" preset
+REC_PATTERN='walletnfcrel|paypal|revolut|number26|\.n26|wise|paysafe|satispay|postepay|\.hype|widiba|bank|intesa|unicredit|santander|bbva|monzo|starling|curve|klarna|coinbase|binance|authenticator|\.wallet'
+APP_EXCLUDE='magisk|kernelsu|ksun|apatch|lsposed|shamiko|mmrl|zygisk|playintegrity|trickystore|tricky_store'
+
+# JSON list of user apps with recommended + currently-in-target flags (for the WebUI)
+list_apps() {
+    cur=" $(sed 's/!//g' "$TS_TARGET" 2>/dev/null | tr '\n' ' ') "
+    pm list packages -3 2>/dev/null | cut -d: -f2 | grep -viE "$APP_EXCLUDE" | sort \
+      | awk -v cur="$cur" -v rec="$REC_PATTERN" '
+        BEGIN{printf "["}
+        { r=(tolower($0)~rec)?"true":"false"; c=(index(cur," " $0 " ")>0)?"true":"false";
+          printf "%s{\"pkg\":\"%s\",\"rec\":%s,\"cur\":%s}",(NR>1?",":""),$0,r,c }
+        END{print "]"}'
+}
+
+# write target.txt = Google core + the given packages
+set_target() {
+    [ -d /data/adb/tricky_store ] || { echo "Tricky Store not installed"; return 1; }
+    [ -f "$TS_TARGET" ] && cp -f "$TS_TARGET" "$TS_TARGET.bak" 2>/dev/null
+    { echo "com.google.android.gms!"; echo "com.android.vending!"; echo "com.google.android.gsf!"
+      for p in "$@"; do echo "$p"; done; } | grep -v '^[[:space:]]*$' | sort -u > "$TS_TARGET"
+    chmod 644 "$TS_TARGET"
+    echo "target.txt now lists $(grep -c . "$TS_TARGET") apps."
+}
+
 # --- PIF + apply -------------------------------------------------------------
 fix_ts_secpatch() {
     [ -f "$TS_SECPATCH" ] || return 0
@@ -158,9 +183,11 @@ case "${1:-}" in
     status-json)     status_json ;;
     set-interval)    set_interval "$2" ;;
     populate-target) populate_target ;;
+    list-apps)       list_apps ;;
+    set-target)      shift; set_target "$@" ;;
     check-now)       check_now ;;
     apply)           apply_keybox ;;
     webui)           launch_webui ;;
     "")              if [ -t 0 ]; then terminal_menu; else launch_webui; fi ;;
-    *)               echo "usage: action.sh [status-json|set-interval N|populate-target|check-now|apply|webui]" ;;
+    *)               echo "usage: action.sh [status-json|set-interval N|populate-target|list-apps|set-target P...|check-now|apply|webui]" ;;
 esac
