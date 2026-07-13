@@ -133,8 +133,9 @@ kb_is_revoked() {
 # --- notification (best effort) ---------------------------------------------
 kb_notify() {
     # $1 = title ; $2 = text
-    cmd notification post -t "$1" "keybox_autofetch" "$2" >/dev/null 2>&1 \
-        || su -lp 2000 -c "cmd notification post -t '$1' keybox_autofetch '$2'" >/dev/null 2>&1
+    # Must post as the shell uid (2000 / com.android.shell). Posting as root
+    # (uid 0) is accepted by 'cmd' but never actually registers or displays.
+    su -lp 2000 -c "cmd notification post -t '$1' keybox_autofetch '$2'" >/dev/null 2>&1
     kb_log "NOTIFY: $1 - $2"
 }
 

@@ -14,8 +14,8 @@ DATA_DIR="/data/adb/keybox_autofetch"
 TS_KEYBOX="/data/adb/tricky_store/keybox.xml"
 PENDING="$DATA_DIR/pending_keybox.xml"
 
-# best-effort notify helper
-notify() { cmd notification post -t "$1" "keybox_autofetch" "$2" >/dev/null 2>&1; }
+# best-effort notify helper (must post as shell uid 2000, not root)
+notify() { su -lp 2000 -c "cmd notification post -t '$1' keybox_autofetch '$2'" >/dev/null 2>&1; }
 
 echo "== Keybox Autofetch: Apply =="
 
