@@ -1,6 +1,6 @@
 #!/system/bin/sh
 #
-# keybox_lib.sh - shared helpers for Keybox Autofetch
+# keybox_lib.sh - shared helpers for TrickyStore Autofetch
 #
 # Design rule (learned the hard way): NEVER modify Tricky Store's own module
 # files. We only ever write to $TS_KEYBOX. Touching /data/adb/modules/tricky_store
@@ -8,13 +8,13 @@
 
 TS_DIR="/data/adb/tricky_store"
 TS_KEYBOX="$TS_DIR/keybox.xml"
-DATA_DIR="/data/adb/keybox_autofetch"
+DATA_DIR="/data/adb/trickystore_autofetch"
 LOG="$DATA_DIR/autofetch.log"
 PENDING="$DATA_DIR/pending_keybox.xml"
 CRL_CACHE="$DATA_DIR/crl.json"
 # Notification icon must live where SystemUI (uid system) can read it; /data/adb
 # is root-only, so we publish it to shared storage. service.sh keeps it in place.
-ICON_PUB="/sdcard/.keybox_autofetch_icon.png"
+ICON_PUB="/sdcard/.trickystore_autofetch_icon.png"
 
 # Source endpoints
 URL_YURIKEY="https://raw.githubusercontent.com/Yurii0307/yurikey/main/key"
@@ -140,7 +140,7 @@ kb_notify() {
     # (uid 0) is accepted by 'cmd' but never actually registers or displays.
     iflag=""
     [ -f "$ICON_PUB" ] && iflag="-i file://$ICON_PUB"
-    su -lp 2000 -c "cmd notification post $iflag -t '$1' keybox_autofetch '$2'" >/dev/null 2>&1
+    su -lp 2000 -c "cmd notification post $iflag -t '$1' trickystore_autofetch '$2'" >/dev/null 2>&1
     kb_log "NOTIFY: $1 - $2"
 }
 

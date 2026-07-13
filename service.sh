@@ -3,7 +3,7 @@
 # service.sh - late_start service. Runs the background check/rotate loop.
 
 MODDIR=${0%/*}
-DATA_DIR="/data/adb/keybox_autofetch"
+DATA_DIR="/data/adb/trickystore_autofetch"
 mkdir -p "$DATA_DIR"
 
 # Seed persistent config on first run (survives module updates).

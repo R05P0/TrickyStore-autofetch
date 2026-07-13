@@ -1,0 +1,155 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>TrickyStore Autofetch</title>
+<style>
+:root{
+  --bg:#0c0f0c; --card:#151a15; --card2:#1c231c; --line:#2a332a;
+  --fg:#e7f0e7; --muted:#8fa08f; --accent:#b7f36a; --accent-d:#0e1408;
+  --ok:#7bd88f; --bad:#ff6b6b; --warn:#ffcf6b;
+}
+*{box-sizing:border-box}
+html,body{margin:0;background:var(--bg);color:var(--fg);
+  font-family:-apple-system,Roboto,"Segoe UI",system-ui,sans-serif;-webkit-tap-highlight-color:transparent}
+body{padding:calc(env(safe-area-inset-top) + 18px) 16px calc(env(safe-area-inset-bottom) + 24px)}
+.wrap{max-width:560px;margin:0 auto}
+header{display:flex;align-items:center;gap:12px;margin-bottom:18px}
+header .logo{width:40px;height:40px;flex:0 0 auto}
+header h1{font-size:19px;margin:0;font-weight:650;letter-spacing:.2px}
+header .sub{font-size:12px;color:var(--muted);margin-top:2px}
+.card{background:var(--card);border:1px solid var(--line);border-radius:16px;padding:16px;margin-bottom:14px}
+.card h2{font-size:12px;text-transform:uppercase;letter-spacing:1px;color:var(--muted);margin:0 0 12px}
+.row{display:flex;justify-content:space-between;align-items:center;padding:7px 0;font-size:14px}
+.row .k{color:var(--muted)}
+.row .v{font-weight:600;font-variant-numeric:tabular-nums}
+.pill{padding:3px 9px;border-radius:999px;font-size:12px;font-weight:700}
+.pill.ok{background:rgba(123,216,143,.15);color:var(--ok)}
+.pill.bad{background:rgba(255,107,107,.15);color:var(--bad)}
+.pill.warn{background:rgba(255,207,107,.15);color:var(--warn)}
+.chips{display:flex;gap:8px;flex-wrap:wrap}
+.chip{flex:1;min-width:54px;text-align:center;padding:10px 0;border-radius:12px;border:1px solid var(--line);
+  background:var(--card2);color:var(--fg);font-weight:600;font-size:14px;cursor:pointer;transition:.15s}
+.chip.active{background:var(--accent);color:var(--accent-d);border-color:var(--accent)}
+.btn{display:block;width:100%;padding:13px;border:none;border-radius:13px;font-size:15px;font-weight:650;
+  cursor:pointer;margin-top:10px;background:var(--card2);color:var(--fg);border:1px solid var(--line)}
+.btn.primary{background:var(--accent);color:var(--accent-d);border-color:var(--accent)}
+.btn.danger{background:rgba(255,107,107,.12);color:var(--bad);border-color:rgba(255,107,107,.4)}
+.btn:active{transform:scale(.985)}
+.hint{font-size:12px;color:var(--muted);margin-top:8px;line-height:1.5}
+#out{white-space:pre-wrap;font-family:ui-monospace,monospace;font-size:12px;color:var(--muted);
+  background:#0a0d0a;border:1px solid var(--line);border-radius:12px;padding:12px;margin-top:12px;min-height:20px;max-height:180px;overflow:auto}
+.modal{position:fixed;inset:0;background:rgba(0,0,0,.6);display:none;align-items:center;justify-content:center;padding:24px;z-index:9}
+.modal.show{display:flex}
+.modal .box{background:var(--card);border:1px solid var(--line);border-radius:18px;padding:20px;max-width:400px;width:100%}
+.modal h3{margin:0 0 8px;font-size:16px}
+.modal p{margin:0 0 16px;color:var(--muted);font-size:14px;line-height:1.5}
+.modal .actions{display:flex;gap:10px}
+.modal .actions .btn{margin-top:0}
+.spin{opacity:.5;pointer-events:none}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <svg class="logo" viewBox="0 0 24 48" fill="var(--accent)" aria-hidden="true"><path d="M12 1a7 7 0 0 0-3 13.3V17l-1 1 1 1-1 1 1 1-1 8 2 2 2-2-1-8 1-1-1-1 1-1-1-1v-2.7A7 7 0 0 0 12 1zm0 2a5 5 0 1 1 0 10A5 5 0 0 1 12 3zm0 2.5a2.5 2.5 0 1 0 0 5 2.5 2.5 0 0 0 0-5z"/></svg>
+    <div>
+      <h1>TrickyStore Autofetch</h1>
+      <div class="sub">keybox + fingerprint, kept green</div>
+    </div>
+  </header>
+
+  <div class="card">
+    <h2>Status</h2>
+    <div class="row"><span class="k">Keybox</span><span class="v" id="s-keybox">…</span></div>
+    <div class="row"><span class="k">Revocation</span><span class="v" id="s-rev">…</span></div>
+    <div class="row"><span class="k">Serial</span><span class="v" id="s-serial" style="font-size:12px">…</span></div>
+    <div class="row"><span class="k">PlayIntegrityFork</span><span class="v" id="s-pif">…</span></div>
+    <div class="row"><span class="k">target.txt</span><span class="v" id="s-target">…</span></div>
+    <div class="row"><span class="k">Check interval</span><span class="v" id="s-int">…</span></div>
+    <button class="btn" onclick="checkNow()">Check now</button>
+  </div>
+
+  <div class="card">
+    <h2>Check interval</h2>
+    <div class="chips" id="chips">
+      <div class="chip" data-s="3600">1h</div>
+      <div class="chip" data-s="10800">3h</div>
+      <div class="chip" data-s="21600">6h</div>
+      <div class="chip" data-s="43200">12h</div>
+      <div class="chip" data-s="86400">24h</div>
+    </div>
+    <div class="hint">Applies on the next cycle — no reboot needed.</div>
+  </div>
+
+  <div class="card">
+    <h2>Actions</h2>
+    <button class="btn" onclick="populate()">Auto-fill target.txt</button>
+    <div class="hint">Rebuilds Tricky Store's target list with the Google core + every app you have installed (root managers excluded).</div>
+    <button class="btn danger" onclick="askApply()">Apply now — renew &amp; reboot</button>
+    <div class="hint">Installs the fresh keybox, renews the PIF fingerprint, clears Play caches and reboots. You'll re-login to Play afterwards.</div>
+  </div>
+
+  <div id="out">ready.</div>
+</div>
+
+<div class="modal" id="modal">
+  <div class="box">
+    <h3>Apply and reboot?</h3>
+    <p>This renews the keybox + fingerprint, clears the Play Store / Play Services caches and <b>reboots now</b>. You will have to sign back in to Google Play.</p>
+    <div class="actions">
+      <button class="btn" onclick="hideModal()">Cancel</button>
+      <button class="btn danger" onclick="doApply()">Reboot &amp; apply</button>
+    </div>
+  </div>
+</div>
+
+<script>
+const AC = "sh /data/adb/trickystore_autofetch/action.sh";
+const out = document.getElementById('out');
+function log(t){ out.textContent = (t||'').trim() || 'done.'; }
+
+function exec(cmd){
+  return new Promise((resolve)=>{
+    if (typeof ksu === 'undefined' || !ksu.exec){ resolve({errno:1,stdout:'',stderr:'no root bridge (open in KsuWebUIStandalone / MMRL)'}); return; }
+    const cb = 'cb'+Date.now()+Math.floor(Math.random()*1e6);
+    window[cb] = (errno,stdout,stderr)=>{ delete window[cb]; resolve({errno,stdout,stderr}); };
+    try { ksu.exec(cmd, '{}', cb); } catch(e){ resolve({errno:1,stdout:'',stderr:String(e)}); }
+  });
+}
+
+async function refresh(){
+  const r = await exec(AC+" status-json");
+  let s; try { s = JSON.parse(r.stdout); } catch(e){ log(r.stderr||r.stdout||'status failed'); return; }
+  document.getElementById('s-keybox').innerHTML = s.keybox==='installed'
+      ? '<span class="pill ok">installed</span>' : '<span class="pill bad">missing</span>';
+  document.getElementById('s-rev').innerHTML = s.revoked
+      ? '<span class="pill bad">REVOKED</span>' : '<span class="pill ok">valid</span>';
+  document.getElementById('s-serial').textContent = s.serial ? (s.serial.slice(0,10)+'…') : '—';
+  document.getElementById('s-pif').innerHTML = s.pif
+      ? '<span class="pill ok">present</span>' : '<span class="pill warn">missing</span>';
+  document.getElementById('s-target').textContent = s.target_count + ' apps';
+  document.getElementById('s-int').textContent = s.interval_h;
+  document.querySelectorAll('.chip').forEach(c=>c.classList.toggle('active', c.dataset.s==String(s.interval)));
+}
+
+document.getElementById('chips').addEventListener('click', async e=>{
+  const c = e.target.closest('.chip'); if(!c) return;
+  log('setting interval…');
+  const r = await exec(AC+" set-interval "+c.dataset.s);
+  log(r.stdout||r.stderr); refresh();
+});
+
+async function checkNow(){ log('checking…'); const r = await exec(AC+" check-now"); log(r.stdout||r.stderr); refresh(); }
+async function populate(){ log('filling target.txt…'); const r = await exec(AC+" populate-target"); log(r.stdout||r.stderr); refresh(); }
+function askApply(){ document.getElementById('modal').classList.add('show'); }
+function hideModal(){ document.getElementById('modal').classList.remove('show'); }
+async function doApply(){ hideModal(); log('applying — the device will reboot…'); document.body.classList.add('spin'); await exec(AC+" apply"); }
+
+// bridge may attach a moment after load
+let tries=0;
+(function boot(){ if(typeof ksu!=='undefined' && ksu.exec){ refresh(); } else if(tries++<20){ setTimeout(boot,150); } else { refresh(); } })();
+</script>
+</body>
+</html>

@@ -5,8 +5,8 @@
 SKIPUNZIP=0
 
 ui_print " "
-ui_print "  Keybox Autofetch for Tricky Store"
-ui_print "  ---------------------------------"
+ui_print "  TrickyStore Autofetch"
+ui_print "  ---------------------"
 
 # Root manager info
 if [ "$KSU" ]; then
@@ -17,7 +17,7 @@ elif [ "$MAGISK_VER_CODE" ]; then
     ui_print "- Root manager: Magisk ($MAGISK_VER)"
     ui_print "! Magisk has no module Action button."
     ui_print "! To use one-tap Apply, install KsuWebUIStandalone,"
-    ui_print "! or run: su -c 'sh /data/adb/keybox_autofetch/action.sh'"
+    ui_print "! or run: su -c 'sh /data/adb/trickystore_autofetch/action.sh'"
 else
     ui_print "! Unknown / unsupported environment"
 fi
@@ -31,7 +31,7 @@ else
 fi
 
 # Persistent data dir + config (survives module updates)
-DATA_DIR="/data/adb/keybox_autofetch"
+DATA_DIR="/data/adb/trickystore_autofetch"
 mkdir -p "$DATA_DIR"
 if [ -f "$DATA_DIR/config.conf" ]; then
     ui_print "- Keeping your existing config.conf"
@@ -44,9 +44,18 @@ cp -f "$MODPATH/action.sh" "$DATA_DIR/action.sh" 2>/dev/null
 
 # Publish notification icon to shared storage (readable by SystemUI)
 if [ -f "$MODPATH/icon.png" ]; then
-    cp -f "$MODPATH/icon.png" /sdcard/.keybox_autofetch_icon.png 2>/dev/null
-    chmod 644 /sdcard/.keybox_autofetch_icon.png 2>/dev/null
+    cp -f "$MODPATH/icon.png" /sdcard/.trickystore_autofetch_icon.png 2>/dev/null
+    chmod 644 /sdcard/.trickystore_autofetch_icon.png 2>/dev/null
     ui_print "- Published notification icon"
+fi
+
+# Seed Tricky Store target.txt with the Google core if it's missing/empty, so
+# integrity works out of the box. (Use the action menu to add all your apps.)
+TGT="/data/adb/tricky_store/target.txt"
+if [ -d "/data/adb/tricky_store" ] && [ ! -s "$TGT" ]; then
+    printf 'com.google.android.gms!\ncom.android.vending!\ncom.google.android.gsf!\n' > "$TGT"
+    chmod 644 "$TGT"
+    ui_print "- Seeded target.txt with Google core"
 fi
 
 ui_print "- Permissions"
