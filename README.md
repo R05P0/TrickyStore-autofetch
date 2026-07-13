@@ -32,7 +32,7 @@ Leaked hardware keyboxes are what let Tricky Store spoof DEVICE/STRONG Play Inte
 2. Flash `keybox-autofetch.zip` in Magisk / KernelSU / APatch.
 3. Reboot.
 
-It runs on boot and every ~12 h thereafter.
+It runs on boot and every ~6 h thereafter.
 
 ## Configure
 
@@ -41,7 +41,7 @@ Edit `/data/adb/keybox_autofetch/config.conf` (this path survives module updates
 ```sh
 SOURCES="yurikey upstream"   # order to try; add 'custom'
 CUSTOM_URL=""                # your own keybox URL if using 'custom'
-INTERVAL=43200               # seconds between checks (min 3600)
+INTERVAL=21600               # seconds between checks (min 3600)
 AUTO_INSTALL=1               # 1: auto-write a valid keybox on revocation; 0: only notify
 CRL_URL="https://android.googleapis.com/attestation/status"
 ```

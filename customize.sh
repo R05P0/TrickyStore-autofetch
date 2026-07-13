@@ -57,7 +57,7 @@ set_perm "$MODPATH/scripts/keybox_lib.sh" 0 0 0755
 set_perm "$DATA_DIR/action.sh"          0 0 0755
 
 ui_print " "
-ui_print "- Done. It checks on boot and every ~12h (edit config.conf)."
+ui_print "- Done. It checks on boot and every ~6h (edit config.conf)."
 ui_print "- Not affiliated with Tricky Store. Do not report Tricky Store"
 ui_print "  issues because of this module."
 ui_print " "
