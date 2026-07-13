@@ -1,4 +1,8 @@
-# Keybox Autofetch for Tricky Store
+<p align="center">
+  <img src="assets/logo-readme.png" width="120" alt="Keybox Autofetch logo">
+</p>
+
+<h1 align="center">Keybox Autofetch for Tricky Store</h1>
 
 A tiny, dependency-free Magisk/KernelSU/APatch module that keeps [Tricky Store](https://github.com/5ec1cff/TrickyStore) supplied with a **working attestation keybox** — automatically.
 
