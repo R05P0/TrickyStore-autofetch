@@ -36,7 +36,9 @@ It runs on boot and every ~6 h thereafter.
 
 ## Configure
 
-Edit `/data/adb/keybox_autofetch/config.conf` (this path survives module updates), then reboot or re-run:
+**Quickest:** run the **action menu** (module Action button on KernelSU/APatch/KsuWebUIStandalone, or by hand: `su -c 'sh /data/adb/keybox_autofetch/action.sh'`). It lets you change the check interval, apply a refreshed keybox, and see status — interval changes take effect on the next cycle, no reboot.
+
+**Or** edit `/data/adb/keybox_autofetch/config.conf` directly (this path survives module updates):
 
 ```sh
 SOURCES="yurikey upstream"   # order to try; add 'custom'
