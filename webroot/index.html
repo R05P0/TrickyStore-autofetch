@@ -48,6 +48,18 @@ header .sub{font-size:12px;color:var(--muted);margin-top:2px}
 .modal .actions{display:flex;gap:10px}
 .modal .actions .btn{margin-top:0}
 .spin{opacity:.5;pointer-events:none}
+.apps-box{max-width:520px;display:flex;flex-direction:column;max-height:82vh}
+.apps-head{display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:12px}
+.apps-head h3{margin:0}
+.preset{display:flex;gap:6px}
+.preset .chip{padding:6px 10px;font-size:13px;min-width:0;flex:0 0 auto}
+.apps-list{flex:1;overflow:auto;border:1px solid var(--line);border-radius:12px;background:#0a0d0a;padding:4px}
+.app{display:flex;align-items:center;gap:10px;padding:9px 10px;border-radius:9px;font-size:13px;cursor:pointer}
+.app:active{background:var(--card2)}
+.app input{width:18px;height:18px;accent-color:var(--accent);flex:0 0 auto}
+.app .pk{flex:1;word-break:break-all;font-family:ui-monospace,monospace;font-size:12px}
+.app .rec{font-size:10px;font-weight:700;color:var(--accent);border:1px solid var(--accent);border-radius:6px;padding:1px 5px;flex:0 0 auto}
+.apps-list .count{color:var(--muted);font-size:12px;padding:8px 10px}
 </style>
 </head>
 <body>
@@ -85,13 +97,31 @@ header .sub{font-size:12px;color:var(--muted);margin-top:2px}
 
   <div class="card">
     <h2>Actions</h2>
-    <button class="btn" onclick="populate()">Auto-fill target.txt</button>
-    <div class="hint">Rebuilds Tricky Store's target list with the Google core + every app you have installed (root managers excluded).</div>
+    <button class="btn" onclick="openApps()">Choose target apps…</button>
+    <div class="hint">Pick which apps Tricky Store spoofs attestation for — <b>Recommended</b>, <b>All</b>, or hand-pick. The Google core is always included.</div>
     <button class="btn danger" onclick="askApply()">Apply now — renew &amp; reboot</button>
     <div class="hint">Installs the fresh keybox, renews the PIF fingerprint, clears Play caches and reboots. You'll re-login to Play afterwards.</div>
   </div>
 
   <div id="out">ready.</div>
+</div>
+
+<div class="modal" id="apps-modal">
+  <div class="box apps-box">
+    <div class="apps-head">
+      <h3>Target apps</h3>
+      <div class="preset">
+        <button class="chip" onclick="preset('rec')">Recommended</button>
+        <button class="chip" onclick="preset('all')">All</button>
+        <button class="chip" onclick="preset('none')">None</button>
+      </div>
+    </div>
+    <div class="apps-list" id="apps-list"><div class="count">loading…</div></div>
+    <div class="actions" style="margin-top:12px">
+      <button class="btn" onclick="hideApps()">Cancel</button>
+      <button class="btn primary" onclick="saveApps()">Save</button>
+    </div>
+  </div>
 </div>
 
 <div class="modal" id="modal">
@@ -142,7 +172,34 @@ document.getElementById('chips').addEventListener('click', async e=>{
 });
 
 async function checkNow(){ log('checking…'); const r = await exec(AC+" check-now"); log(r.stdout||r.stderr); refresh(); }
-async function populate(){ log('filling target.txt…'); const r = await exec(AC+" populate-target"); log(r.stdout||r.stderr); refresh(); }
+let APPS=[];
+async function openApps(){
+  document.getElementById('apps-modal').classList.add('show');
+  const el=document.getElementById('apps-list'); el.innerHTML='<div class="count">loading apps…</div>';
+  const r=await exec(AC+" list-apps");
+  try{ APPS=JSON.parse(r.stdout); }catch(e){ el.innerHTML='<div class="count">failed: '+((r.stderr||r.stdout)||'no data')+'</div>'; return; }
+  renderApps();
+}
+function renderApps(){
+  const el=document.getElementById('apps-list');
+  if(!APPS.length){ el.innerHTML='<div class="count">no user apps found</div>'; return; }
+  el.innerHTML = APPS.map((a,i)=>
+    `<label class="app"><input type="checkbox" data-i="${i}" ${a.cur?'checked':''}>`+
+    `<span class="pk">${a.pkg}</span>${a.rec?'<span class="rec">rec</span>':''}</label>`).join('');
+}
+function preset(kind){
+  document.querySelectorAll('#apps-list input').forEach(cb=>{
+    const a=APPS[cb.dataset.i];
+    cb.checked = kind==='all' ? true : kind==='none' ? false : !!(a&&a.rec);
+  });
+}
+function hideApps(){ document.getElementById('apps-modal').classList.remove('show'); }
+async function saveApps(){
+  const pkgs=[...document.querySelectorAll('#apps-list input:checked')].map(cb=>APPS[cb.dataset.i].pkg);
+  hideApps(); log('saving target.txt…');
+  const r=await exec(AC+" set-target "+pkgs.join(' '));
+  log(r.stdout||r.stderr); refresh();
+}
 function askApply(){ document.getElementById('modal').classList.add('show'); }
 function hideModal(){ document.getElementById('modal').classList.remove('show'); }
 async function doApply(){ hideModal(); log('applying — the device will reboot…'); document.body.classList.add('spin'); await exec(AC+" apply"); }
