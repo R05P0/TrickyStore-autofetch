@@ -24,7 +24,7 @@ fi
 run_once() {
     # (re)load config each cycle so edits apply without reinstall
     . "$DATA_DIR/config.conf"
-    [ -n "$INTERVAL" ] || INTERVAL=43200
+    [ -n "$INTERVAL" ] || INTERVAL=21600
     [ "$INTERVAL" -ge 3600 ] 2>/dev/null || INTERVAL=3600
     [ -n "$AUTO_INSTALL" ] || AUTO_INSTALL=1
 
@@ -84,7 +84,7 @@ run_once() {
   while true; do
     run_once
     . "$DATA_DIR/config.conf" 2>/dev/null
-    [ -n "$INTERVAL" ] && [ "$INTERVAL" -ge 3600 ] 2>/dev/null || INTERVAL=43200
+    [ -n "$INTERVAL" ] && [ "$INTERVAL" -ge 3600 ] 2>/dev/null || INTERVAL=21600
     sleep "$INTERVAL"
   done
 ) &
