@@ -9,8 +9,14 @@
 DATA_DIR="/data/adb/keybox_autofetch"
 CONFIG="$DATA_DIR/config.conf"
 TS_KEYBOX="/data/adb/tricky_store/keybox.xml"
+TS_SECPATCH="/data/adb/tricky_store/security_patch.txt"
 PENDING="$DATA_DIR/pending_keybox.xml"
+PIF_DIR="/data/adb/modules/playintegrityfix"
 ICON_PUB="/sdcard/.keybox_autofetch_icon.png"
+
+# load user config (RENEW_PIF etc.)
+[ -f "$CONFIG" ] && . "$CONFIG"
+[ -n "$RENEW_PIF" ] || RENEW_PIF=1
 
 notify() {
     iflag=""; [ -f "$ICON_PUB" ] && iflag="-i file://$ICON_PUB"
@@ -38,16 +44,49 @@ set_interval() {
     echo "     Applies on the next check cycle (no reboot needed)."
 }
 
+# autopif sometimes writes a malformed 'system=' line into Tricky Store's
+# security_patch.txt (e.g. "system=202607"). Normalise all three to one valid date.
+fix_ts_secpatch() {
+    [ -f "$TS_SECPATCH" ] || return 0
+    sp="$(grep -m1 '^SECURITY_PATCH=' "$PIF_DIR/custom.pif.prop" 2>/dev/null | cut -d= -f2)"
+    case "$sp" in [0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]) ;; *)
+        sp="$(grep -m1 '^boot=' "$TS_SECPATCH" | cut -d= -f2)" ;; esac
+    case "$sp" in [0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9])
+        printf 'system=%s\nboot=%s\nvendor=%s\n' "$sp" "$sp" "$sp" > "$TS_SECPATCH"
+        echo "  - Tricky Store security_patch normalised to $sp" ;;
+    esac
+}
+
+renew_pif() {
+    [ "$RENEW_PIF" = "1" ] || return 0
+    if [ ! -f "$PIF_DIR/autopif4.sh" ]; then
+        echo "  - PlayIntegrityFork not found, skipping fingerprint renewal"; return 0
+    fi
+    echo "  - renewing PIF fingerprint (autopif)..."
+    if (cd "$PIF_DIR" && timeout 150 sh autopif4.sh >/dev/null 2>&1); then
+        echo "    fingerprint renewed"
+        fix_ts_secpatch
+    else
+        echo "    autopif failed (no network?) - keeping current fingerprint"
+    fi
+}
+
 apply_keybox() {
-    echo "  Applying: clearing Play Integrity caches + rebooting..."
+    echo "  Seamless apply: keybox + PIF fingerprint + re-attest + reboot"
+    # 1) install the freshly fetched keybox if one is pending
     if [ -f "$PENDING" ] && grep -q "<AndroidAttestation" "$PENDING" 2>/dev/null; then
         cp -f "$TS_KEYBOX" "$DATA_DIR/keybox.prev.xml" 2>/dev/null
         cp -f "$PENDING" "$TS_KEYBOX" && chmod 644 "$TS_KEYBOX" && rm -f "$PENDING"
         echo "  - installed pending keybox"
     fi
+    # 2) refresh the PlayIntegrityFork fingerprint (keeps BASIC green)
+    renew_pif
+    # 3) force GMS/Play to re-attest with the new keybox + fingerprint
+    echo "  - clearing Play Integrity caches (GMS + Play Store)"
     pm clear com.google.android.gms  >/dev/null 2>&1
     pm clear com.android.vending     >/dev/null 2>&1
-    notify "Applying keybox" "Re-attesting and rebooting now."
+    # 4) reboot
+    notify "Applying keybox" "Renewed keybox + fingerprint. Rebooting to re-attest."
     echo "  - rebooting in 3s (re-login to Play after boot)"
     sleep 3
     reboot

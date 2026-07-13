@@ -26,9 +26,25 @@ Leaked hardware keyboxes are what let Tricky Store spoof DEVICE/STRONG Play Inte
 - **Notifies you**, then a one-tap **Apply** clears the Play Integrity caches and reboots so the new key takes effect.
 - **Pure shell.** No compiled binary, ~4 small scripts. Uses `curl`, `base64`, `awk`, `xxd` — all present on modern Android.
 
+## Requirements
+
+Integrity on an unlocked bootloader needs **two** things working together, and this module keeps both fed:
+
+| Module | Why | Required? |
+|--------|-----|-----------|
+| **[Tricky Store](https://github.com/5ec1cff/TrickyStore)** | keystore attestation via the keybox → **DEVICE** integrity | ✅ yes |
+| **[PlayIntegrityFork](https://github.com/osm0sis/PlayIntegrityFork)** (PIF) | spoofs the device fingerprint → **BASIC** integrity | ✅ yes |
+| **Zygisk** (Magisk/KernelSU/APatch) | needed by PIF | ✅ yes |
+| **Shamiko** + DenyList | hide root from banking/payment apps | ⭐ recommended for real apps |
+| Tricky Addon / Update Target List | — | ❌ **not needed** — this module manages the keybox itself |
+
+> Get all three verdicts only if **both** Tricky Store **and** PIF are healthy. A valid keybox alone gives you DEVICE but **not** BASIC. This module's **Apply** renews *both* the keybox and the PIF fingerprint in one shot.
+
+**`target.txt`:** Tricky Store spoofs attestation only for packages listed in `/data/adb/tricky_store/target.txt`. At minimum it should contain `com.google.android.gms` and `com.android.vending` (plus your banking apps). Without the Tricky Addon you just edit that file by hand.
+
 ## Install
 
-1. Install [Tricky Store](https://github.com/5ec1cff/TrickyStore) first.
+1. Install **Tricky Store** and **PlayIntegrityFork** first, with **Zygisk enabled**.
 2. Flash `keybox-autofetch.zip` in Magisk / KernelSU / APatch.
 3. Reboot.
 
@@ -58,7 +74,14 @@ When a new keybox is installed you get a notification. To make it effective you 
   su -c 'sh /data/adb/keybox_autofetch/action.sh'
   ```
 
-Either way it clears the GMS + Play Store caches and reboots. **You will be signed out of Google Play and have to log back in — this is expected** (that's how re-attestation is forced).
+**Apply is seamless** — one action does everything needed to go green again:
+
+1. installs the freshly fetched keybox,
+2. renews the **PlayIntegrityFork fingerprint** (`RENEW_PIF=1`, so BASIC stays green when a canary/beta fingerprint expires) and repairs Tricky Store's `security_patch.txt` if autopif malformed it,
+3. clears the GMS + Play Store caches,
+4. reboots.
+
+**You will be signed out of Google Play and have to log back in — this is expected** (that's how re-attestation is forced).
 
 ## Honest limitations
 
