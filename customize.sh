@@ -42,6 +42,13 @@ fi
 # Copy action.sh so it can be run manually even without the module dir mounted
 cp -f "$MODPATH/action.sh" "$DATA_DIR/action.sh" 2>/dev/null
 
+# Publish notification icon to shared storage (readable by SystemUI)
+if [ -f "$MODPATH/icon.png" ]; then
+    cp -f "$MODPATH/icon.png" /sdcard/.keybox_autofetch_icon.png 2>/dev/null
+    chmod 644 /sdcard/.keybox_autofetch_icon.png 2>/dev/null
+    ui_print "- Published notification icon"
+fi
+
 ui_print "- Permissions"
 set_perm_recursive "$MODPATH" 0 0 0755 0644
 set_perm "$MODPATH/service.sh"          0 0 0755

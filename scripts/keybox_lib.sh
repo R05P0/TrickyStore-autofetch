@@ -12,6 +12,9 @@ DATA_DIR="/data/adb/keybox_autofetch"
 LOG="$DATA_DIR/autofetch.log"
 PENDING="$DATA_DIR/pending_keybox.xml"
 CRL_CACHE="$DATA_DIR/crl.json"
+# Notification icon must live where SystemUI (uid system) can read it; /data/adb
+# is root-only, so we publish it to shared storage. service.sh keeps it in place.
+ICON_PUB="/sdcard/.keybox_autofetch_icon.png"
 
 # Source endpoints
 URL_YURIKEY="https://raw.githubusercontent.com/Yurii0307/yurikey/main/key"
@@ -135,7 +138,9 @@ kb_notify() {
     # $1 = title ; $2 = text
     # Must post as the shell uid (2000 / com.android.shell). Posting as root
     # (uid 0) is accepted by 'cmd' but never actually registers or displays.
-    su -lp 2000 -c "cmd notification post -t '$1' keybox_autofetch '$2'" >/dev/null 2>&1
+    iflag=""
+    [ -f "$ICON_PUB" ] && iflag="-i file://$ICON_PUB"
+    su -lp 2000 -c "cmd notification post $iflag -t '$1' keybox_autofetch '$2'" >/dev/null 2>&1
     kb_log "NOTIFY: $1 - $2"
 }
 

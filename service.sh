@@ -15,6 +15,12 @@ mkdir -p "$DATA_DIR"
 until [ "$(getprop sys.boot_completed)" = "1" ]; do sleep 2; done
 sleep 20   # let connectivity settle
 
+# Publish the notification icon to shared storage (SystemUI, uid system, must be
+# able to read it; the module dir under /data/adb is root-only).
+if [ -f "$MODDIR/icon.png" ]; then
+    cp -f "$MODDIR/icon.png" "$ICON_PUB" 2>/dev/null && chmod 644 "$ICON_PUB" 2>/dev/null
+fi
+
 run_once() {
     # (re)load config each cycle so edits apply without reinstall
     . "$DATA_DIR/config.conf"

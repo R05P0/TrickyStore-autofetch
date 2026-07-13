@@ -15,7 +15,11 @@ TS_KEYBOX="/data/adb/tricky_store/keybox.xml"
 PENDING="$DATA_DIR/pending_keybox.xml"
 
 # best-effort notify helper (must post as shell uid 2000, not root)
-notify() { su -lp 2000 -c "cmd notification post -t '$1' keybox_autofetch '$2'" >/dev/null 2>&1; }
+ICON_PUB="/sdcard/.keybox_autofetch_icon.png"
+notify() {
+    iflag=""; [ -f "$ICON_PUB" ] && iflag="-i file://$ICON_PUB"
+    su -lp 2000 -c "cmd notification post $iflag -t '$1' keybox_autofetch '$2'" >/dev/null 2>&1
+}
 
 echo "== Keybox Autofetch: Apply =="
 
