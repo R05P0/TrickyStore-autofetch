@@ -1,8 +1,8 @@
 <p align="center">
-  <img src="assets/logo-readme.png" width="120" alt="Keybox Autofetch logo">
+  <img src="assets/logo-readme.png" width="120" alt="TrickyStore Autofetch logo">
 </p>
 
-<h1 align="center">Keybox Autofetch for Tricky Store</h1>
+<h1 align="center">TrickyStore Autofetch</h1>
 
 A tiny, dependency-free Magisk/KernelSU/APatch module that keeps [Tricky Store](https://github.com/5ec1cff/TrickyStore) supplied with a **working attestation keybox** — automatically.
 
@@ -40,21 +40,21 @@ Integrity on an unlocked bootloader needs **two** things working together, and t
 
 > Get all three verdicts only if **both** Tricky Store **and** PIF are healthy. A valid keybox alone gives you DEVICE but **not** BASIC. This module's **Apply** renews *both* the keybox and the PIF fingerprint in one shot.
 
-**`target.txt`:** Tricky Store spoofs attestation only for packages listed in `/data/adb/tricky_store/target.txt`. At minimum it should contain `com.google.android.gms` and `com.android.vending` (plus your banking apps). Without the Tricky Addon you just edit that file by hand.
+**`target.txt`:** Tricky Store spoofs attestation only for packages listed in `/data/adb/tricky_store/target.txt`. Install seeds it with the Google core (`gms` / `vending` / `gsf`), and the **action menu → "Auto-fill target.txt"** rebuilds it with the Google core plus every user app you have installed (root managers excluded) — so you never need the Tricky Addon for this.
 
 ## Install
 
 1. Install **Tricky Store** and **PlayIntegrityFork** first, with **Zygisk enabled**.
-2. Flash `keybox-autofetch.zip` in Magisk / KernelSU / APatch.
+2. Flash `TrickyStore-autofetch.zip` in Magisk / KernelSU / APatch.
 3. Reboot.
 
 It runs on boot and every ~6 h thereafter.
 
 ## Configure
 
-**Quickest:** run the **action menu** (module Action button on KernelSU/APatch/KsuWebUIStandalone, or by hand: `su -c 'sh /data/adb/keybox_autofetch/action.sh'`). It lets you change the check interval, apply a refreshed keybox, and see status — interval changes take effect on the next cycle, no reboot.
+**Quickest:** run the **action menu** (module Action button on KernelSU/APatch/KsuWebUIStandalone, or by hand: `su -c 'sh /data/adb/trickystore_autofetch/action.sh'`). It lets you change the check interval, apply a refreshed keybox, and see status — interval changes take effect on the next cycle, no reboot.
 
-**Or** edit `/data/adb/keybox_autofetch/config.conf` directly (this path survives module updates):
+**Or** edit `/data/adb/trickystore_autofetch/config.conf` directly (this path survives module updates):
 
 ```sh
 SOURCES="yurikey upstream"   # order to try; add 'custom'
@@ -71,7 +71,7 @@ When a new keybox is installed you get a notification. To make it effective you 
 - **KernelSU / APatch / KsuWebUIStandalone:** tap the module's **Action** button.
 - **Magisk (no Action button):** run
   ```sh
-  su -c 'sh /data/adb/keybox_autofetch/action.sh'
+  su -c 'sh /data/adb/trickystore_autofetch/action.sh'
   ```
 
 **Apply is seamless** — one action does everything needed to go green again:
@@ -88,7 +88,7 @@ When a new keybox is installed you get a notification. To make it effective you 
 - **The CRL is not the whole story.** Google's public revocation list catches keys revoked *at the certificate level*. Google's server-side integrity backend can also reject a key that is **not** in the public CRL. So "not revoked per the CRL" is a good signal, **not a guarantee** your keybox passes integrity. The only 100% reliable "is it dead" test is an actual Play Integrity request.
 - **Sources overlap.** Public keybox repos frequently serve the *same* leaked key under different labels. This module compares leaf serials and skips a candidate that is identical to your current key, but it can't manufacture a genuinely new key that nobody has published.
 - **Leaked keyboxes are a moving target.** When every public source is revoked, no tool can help — the only stable path for real attestation is a locked bootloader on stock firmware.
-- **Notifications are best-effort** via `cmd notification`; on some ROMs they may not appear. The log at `/data/adb/keybox_autofetch/autofetch.log` always records what happened.
+- **Notifications are best-effort** via `cmd notification`; on some ROMs they may not appear. The log at `/data/adb/trickystore_autofetch/autofetch.log` always records what happened.
 
 ## How it works (internals)
 
