@@ -16,7 +16,7 @@ html,body{margin:0;background:var(--bg);color:var(--fg);
 body{padding:calc(env(safe-area-inset-top) + 18px) 16px calc(env(safe-area-inset-bottom) + 24px)}
 .wrap{max-width:560px;margin:0 auto}
 header{display:flex;align-items:center;gap:12px;margin-bottom:18px}
-header .logo{width:40px;height:40px;flex:0 0 auto}
+header .logo{height:44px;width:auto;flex:0 0 auto}
 header h1{font-size:19px;margin:0;font-weight:650;letter-spacing:.2px}
 header .sub{font-size:12px;color:var(--muted);margin-top:2px}
 .card{background:var(--card);border:1px solid var(--line);border-radius:16px;padding:16px;margin-bottom:14px}
@@ -53,7 +53,7 @@ header .sub{font-size:12px;color:var(--muted);margin-top:2px}
 <body>
 <div class="wrap">
   <header>
-    <svg class="logo" viewBox="0 0 24 48" fill="var(--accent)" aria-hidden="true"><path d="M12 1a7 7 0 0 0-3 13.3V17l-1 1 1 1-1 1 1 1-1 8 2 2 2-2-1-8 1-1-1-1 1-1-1-1v-2.7A7 7 0 0 0 12 1zm0 2a5 5 0 1 1 0 10A5 5 0 0 1 12 3zm0 2.5a2.5 2.5 0 1 0 0 5 2.5 2.5 0 0 0 0-5z"/></svg>
+    <img class="logo" src="logo.png" alt="" aria-hidden="true">
     <div>
       <h1>TrickyStore Autofetch</h1>
       <div class="sub">keybox + fingerprint, kept green</div>
