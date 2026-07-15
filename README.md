@@ -8,6 +8,10 @@ A tiny, dependency-free Magisk/KernelSU/APatch module that keeps [Tricky Store](
 
 On a schedule it asks Google whether your current keybox has been revoked. If it has, it fetches a fresh one from a list of public sources (with failover), validates it, installs it, and sends you a notification. One tap re-attests and reboots.
 
+[**Download latest release →**](https://github.com/R05P0/TrickyStore-autofetch/releases/latest/download/trickystore-autofetch-v1.0.0.zip)
+
+> ⚠️ **For educational purposes only.** Use at your own risk.
+
 > ⚠️ **Not affiliated with Tricky Store.** Do not open issues on the Tricky Store repo because of this module.
 
 ---
