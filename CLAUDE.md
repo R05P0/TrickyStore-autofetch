@@ -57,11 +57,12 @@ action.sh webui              # open WebUI in KsuWebUIStandalone / MMRL
 ```
 
 ## keybox_lib.sh functions
-`kb_fetch_source` (ddex/yurikey/upstream/custom) → `kb_normalise` → `kb_structural_ok` → `kb_leaf_serial` → `kb_refresh_crl`/`kb_is_revoked` → `kb_install`. Notify via `kb_notify`.
+`kb_fetch_source` (specter/ddex/yurikey/upstream/custom) → `kb_normalise` → `kb_structural_ok` → `kb_leaf_serial` → `kb_refresh_crl`/`kb_is_revoked` → `kb_install`. Notify via `kb_notify`.
 
-- **Source encodings** (auto-detected by `kb_normalise`): raw XML | base64→XML (yurikey) | hex→base64→XML (upstream KOWX712 `keybox/.extra`).
+- **Source encodings** (auto-detected by `kb_normalise`): raw XML | base64→XML (yurikey) | hex→base64→XML (upstream KOWX712 `keybox/.extra`) | **shuffled-base64→XML (specter: scrambled b64 alphabet, `/key/<source>/<version>`)**.
 - **Revocation**: extract the leaf cert serial (ASN.1/DER parsed in pure `awk`+`base64`+`xxd`, **no openssl on device**) and grep it in Google's CRL `https://android.googleapis.com/attestation/status`. NB: the public CRL doesn't list *every* dead key (Google also blocks server-side), so "not revoked" ≠ "passes integrity".
 - Public sources often serve the **same** leaked key under different labels; `kb_leaf_serial` is used to skip a candidate identical to the current key.
+- **specter** source = dpejoh's curated JSON catalog (`rawbin.dpejoh.com/catalog`): picks the NEWEST `revoked:false` entry; if it equals the current mounted serial it returns non-zero ("nothing new"), so it acts as a MONITOR that auto-adopts the next fresh leak. Key blob at `/key/<source>/<version>` is shuffled-base64 (alphabet in `kb_normalise`). NB: "not revoked" = passes Play Integrity, NOT necessarily tap-to-pay (Google's payment blocklist is stricter).
 
 ## WebUI (webroot/)
 - Talks to root via the KSU WebUI bridge: `ksu.exec(cmd, '{}', callbackName)` where the callback gets `(errno, stdout, stderr)`. See the `exec()` wrapper in `index.html`.

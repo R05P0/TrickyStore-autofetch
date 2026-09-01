@@ -1,15 +1,10 @@
+## v1.2.0
+- **New source: `specter`** (dpejoh's curated catalog at `rawbin.dpejoh.com/catalog`). It tracks per-key serial/revoked/timestamp and a "working" pointer. The module now picks the NEWEST non-revoked key; when that equals the currently mounted one it does nothing, so `specter` effectively works as a MONITOR that auto-adopts the next fresh leak. Added to the default source order (`specter ddex yurikey`).
+- `kb_normalise` now also decodes Specter's **shuffled-base64** key blobs (scrambled b64 alphabet on `/key/<source>/<version>`).
+- Note: a keybox being "not revoked" means it passes Play Integrity — it is NOT a guarantee it passes Google Wallet tap-to-pay, whose blocklist is stricter.
+
 ## v1.1.0
-- Add **ddex** source (dare-devil-ex/keyboxxBot, raw XML) — a genuinely different key (DeviceID `wkaie`, not in CRL, valid to 2030). Now the first source tried.
-- Mark **upstream** (KOWX712) as dead (serves 0 bytes since 2026-08); dropped from the default source list.
-- Default `SOURCES` is now `ddex yurikey`.
+- Added `ddex` source (dare-devil-ex/keyboxxBot, DeviceID "wkaie"), a genuinely different key from yurikey.
 
 ## v1.0.0
-- Initial release.
-- Revocation-aware keybox rotation for Tricky Store.
-- Checks the active keybox leaf serial against Google's attestation CRL.
-- Multi-source fetch with failover: yurikey, upstream (KOWX712), custom.
-- Structural + revocation validation before install; skips identical keys.
-- Writes only `/data/adb/tricky_store/keybox.xml` — never touches Tricky Store's module files.
-- Notification with a keys icon; interactive `action.sh` menu (change interval / status / apply).
-- **Seamless Apply**: installs the keybox, renews the PlayIntegrityFork fingerprint (autopif) so BASIC stays green, repairs Tricky Store's `security_patch.txt`, clears Play caches, and reboots — one action, all three verdicts.
-- Default check interval 6h (configurable, no reboot to change).
+- Initial release: autofetch keybox with CRL revocation check + PIF renewal on Apply.

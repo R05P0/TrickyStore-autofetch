@@ -22,6 +22,11 @@ URL_DDEX="https://raw.githubusercontent.com/dare-devil-ex/keyboxxBot/main/keybox
 # KOWX712 upstream mirror: dead as of 2026-08 (serves 0 bytes). Kept as a known
 # name for back-compat; not in the default source list any more.
 URL_UPSTREAM="https://raw.githubusercontent.com/KOWX712/Tricky-Addon-Update-Target-List/keybox/.extra"
+# Specter keybox catalog (dpejoh) - the best-curated public source: a JSON catalog
+# with per-entry serial/revoked/timestamp + a "working"/"latest" summary. We monitor
+# it and grab the NEWEST non-revoked key when a genuinely new one is leaked.
+URL_SPECTER_CATALOG="https://rawbin.dpejoh.com/catalog"
+URL_SPECTER_KEY="https://rawbin.dpejoh.com/key"
 
 # Fallback if config.conf is missing/old (service.sh sources config which sets this)
 : "${CRL_URL:=https://android.googleapis.com/attestation/status}"
@@ -49,6 +54,7 @@ kb_download() {
 #   ddex     : already <AndroidAttestation> XML (raw)
 #   yurikey  : base64  -> XML
 #   upstream : hex     -> base64 -> XML
+#   specter  : shuffled-base64 -> XML (scrambled alphabet)
 # Auto-detect by trying each and keeping whatever yields valid XML.
 kb_normalise() {
     # stdin = raw source body ; stdout = keybox XML ; returns non-zero on failure
@@ -67,7 +73,31 @@ kb_normalise() {
     dec2="$(printf '%s' "$b64" | base64 -d 2>/dev/null)"
     case "$dec2" in *"<AndroidAttestation"*) printf '%s' "$dec2"; return 0 ;; esac
 
+    # Specter shuffled-base64 -> XML (dpejoh's /key endpoint scrambles the b64 alphabet)
+    sdec="$(printf '%s' "$clean" \
+        | tr '1dgWnocayqxU3r6vA5lCIPYfHmkV08b4tz+KMsp2NQ9LRXihODwSj7BEFJ/ZuGTe' \
+             'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/' \
+        | base64 -d 2>/dev/null)"
+    case "$sdec" in *"<AndroidAttestation"*) printf '%s' "$sdec"; return 0 ;; esac
+
     return 1
+}
+
+# Parse Specter's JSON catalog (stdin) and print the NEWEST non-revoked entry as
+# "source\tversion\tserial\ttimestamp". Pure sed/grep/sort so it runs under toybox.
+kb_specter_pick_newest() {
+    sed 's/},{/}\n{/g' \
+      | grep '"revoked":false' \
+      | while IFS= read -r line; do
+            ser=$(printf '%s' "$line" | grep -oE '"serial":"[^"]*"'    | head -1 | sed 's/.*:"//;s/"$//')
+            src=$(printf '%s' "$line" | grep -oE '"source":"[^"]*"'    | head -1 | sed 's/.*:"//;s/"$//')
+            ver=$(printf '%s' "$line" | grep -oE '"version":"[^"]*"'   | head -1 | sed 's/.*:"//;s/"$//')
+            ts=$(printf  '%s' "$line" | grep -oE '"timestamp":"[^"]*"' | head -1 | sed 's/.*:"//;s/"$//')
+            [ -n "$ser" ] || continue
+            printf '%s\t%s\t%s\t%s\n' "$ts" "$src" "$ver" "$ser"
+        done \
+      | sort -r | head -1 \
+      | awk -F'\t' '{print $2"\t"$3"\t"$4"\t"$1}'
 }
 
 kb_fetch_source() {
@@ -77,6 +107,22 @@ kb_fetch_source() {
         yurikey)  url="$URL_YURIKEY" ;;
         ddex)     url="$URL_DDEX" ;;
         upstream) url="$URL_UPSTREAM" ;;
+        specter)
+            catj="$(kb_download "$URL_SPECTER_CATALOG")"
+            [ -n "$catj" ] || { kb_log "specter: empty catalog"; return 1; }
+            newest="$(printf '%s' "$catj" | kb_specter_pick_newest)"
+            [ -n "$newest" ] || { kb_log "specter: no non-revoked entry"; return 1; }
+            n_src="$(printf '%s' "$newest" | cut -f1)"
+            n_ver="$(printf '%s' "$newest" | cut -f2)"
+            n_ser="$(printf '%s' "$newest" | cut -f3)"
+            cur_ser="$(kb_leaf_serial "$TS_KEYBOX" 2>/dev/null)"
+            if [ -n "$cur_ser" ] && [ "$n_ser" = "$cur_ser" ]; then
+                kb_log "specter: newest non-revoked ($n_src/$n_ver serial=$n_ser) == current; nothing new"
+                return 1
+            fi
+            kb_log "specter: NEW candidate $n_src/$n_ver serial=$n_ser (current=$cur_ser)"
+            url="$URL_SPECTER_KEY/$n_src/$n_ver"
+            ;;
         custom)   url="$custom" ;;
         *) kb_log "unknown source '$src'"; return 1 ;;
     esac
