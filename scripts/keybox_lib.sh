@@ -18,6 +18,9 @@ ICON_PUB="/sdcard/.trickystore_autofetch_icon.png"
 
 # Source endpoints
 URL_YURIKEY="https://raw.githubusercontent.com/Yurii0307/yurikey/main/key"
+URL_DDEX="https://raw.githubusercontent.com/dare-devil-ex/keyboxxBot/main/keybox.xml"
+# KOWX712 upstream mirror: dead as of 2026-08 (serves 0 bytes). Kept as a known
+# name for back-compat; not in the default source list any more.
 URL_UPSTREAM="https://raw.githubusercontent.com/KOWX712/Tricky-Addon-Update-Target-List/keybox/.extra"
 
 # Fallback if config.conf is missing/old (service.sh sources config which sets this)
@@ -43,7 +46,7 @@ kb_download() {
 
 # --- keybox normalisation ----------------------------------------------------
 # Sources encode the keybox differently:
-#   raw      : already <AndroidAttestation> XML
+#   ddex     : already <AndroidAttestation> XML (raw)
 #   yurikey  : base64  -> XML
 #   upstream : hex     -> base64 -> XML
 # Auto-detect by trying each and keeping whatever yields valid XML.
@@ -72,6 +75,7 @@ kb_fetch_source() {
     src="$1"; custom="$2"; out="$3"
     case "$src" in
         yurikey)  url="$URL_YURIKEY" ;;
+        ddex)     url="$URL_DDEX" ;;
         upstream) url="$URL_UPSTREAM" ;;
         custom)   url="$custom" ;;
         *) kb_log "unknown source '$src'"; return 1 ;;

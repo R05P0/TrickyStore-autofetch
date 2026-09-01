@@ -57,7 +57,7 @@ action.sh webui              # open WebUI in KsuWebUIStandalone / MMRL
 ```
 
 ## keybox_lib.sh functions
-`kb_fetch_source` (yurikey/upstream/custom) → `kb_normalise` → `kb_structural_ok` → `kb_leaf_serial` → `kb_refresh_crl`/`kb_is_revoked` → `kb_install`. Notify via `kb_notify`.
+`kb_fetch_source` (ddex/yurikey/upstream/custom) → `kb_normalise` → `kb_structural_ok` → `kb_leaf_serial` → `kb_refresh_crl`/`kb_is_revoked` → `kb_install`. Notify via `kb_notify`.
 
 - **Source encodings** (auto-detected by `kb_normalise`): raw XML | base64→XML (yurikey) | hex→base64→XML (upstream KOWX712 `keybox/.extra`).
 - **Revocation**: extract the leaf cert serial (ASN.1/DER parsed in pure `awk`+`base64`+`xxd`, **no openssl on device**) and grep it in Google's CRL `https://android.googleapis.com/attestation/status`. NB: the public CRL doesn't list *every* dead key (Google also blocks server-side), so "not revoked" ≠ "passes integrity".

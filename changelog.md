@@ -1,3 +1,8 @@
+## v1.1.0
+- Add **ddex** source (dare-devil-ex/keyboxxBot, raw XML) — a genuinely different key (DeviceID `wkaie`, not in CRL, valid to 2030). Now the first source tried.
+- Mark **upstream** (KOWX712) as dead (serves 0 bytes since 2026-08); dropped from the default source list.
+- Default `SOURCES` is now `ddex yurikey`.
+
 ## v1.0.0
 - Initial release.
 - Revocation-aware keybox rotation for Tricky Store.

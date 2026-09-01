@@ -92,7 +92,8 @@ fix_ts_secpatch() {
     case "$sp" in [0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]) ;; *)
         sp="$(grep -m1 '^boot=' "$TS_SECPATCH" | cut -d= -f2)" ;; esac
     case "$sp" in [0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9])
-        printf 'system=%s\nboot=%s\nvendor=%s\n' "$sp" "$sp" "$sp" > "$TS_SECPATCH" ;; esac
+        # Tag::OS_PATCHLEVEL vuole YYYYMM; vendor/boot patch level vogliono YYYYMMDD.
+        printf 'system=%s\nboot=%s\nvendor=%s\n' "$(echo "$sp" | cut -c1-7 | tr -d -)" "$sp" "$sp" > "$TS_SECPATCH" ;; esac
 }
 
 renew_pif() {
