@@ -10,6 +10,8 @@
 #   action.sh populate-target -> auto-fill Tricky Store target.txt
 #   action.sh check-now       -> run one keybox revocation check now
 #   action.sh apply           -> renew keybox+fingerprint, clear caches, reboot
+#   action.sh list-sources | set-sources S... | add-source NAME URL [HEADER]
+#   action.sh remove-source NAME | test-url URL [HEADER] | test-source NAME
 #
 # Nothing here touches Tricky Store's module files - only keybox.xml / target.txt
 # / security_patch.txt and our own config.
@@ -61,6 +63,150 @@ populate_target() {
     grep -v '^[[:space:]]*$' "$tmp" | sort -u > "$TS_TARGET"
     chmod 644 "$TS_TARGET"; rm -f "$tmp"
     echo "target.txt now lists $(grep -c . "$TS_TARGET") apps (backup saved)."
+}
+
+# --- keybox sources -----------------------------------------------------------
+cur_sources() { grep '^SOURCES=' "$CONFIG" 2>/dev/null | cut -d= -f2- | tr -d '"'; }
+
+# One JSON object per line, each starting with a comma (list_sources strips the
+# first one). $1 name $2 label $3 desc $4 enabled $5 priority(0 = not enabled)
+src_json() {
+    cflag=false; hflag=false
+    if [ -s "$CUSTOM_LIST" ] && awk -F'\t' -v n="$1" '$1==n{f=1} END{exit !f}' "$CUSTOM_LIST"; then
+        cflag=true
+        [ -n "$(awk -F'\t' -v n="$1" '$1==n{print $3; exit}' "$CUSTOM_LIST")" ] && hflag=true
+    fi
+    printf ',{"name":"%s","label":"%s","desc":"%s","enabled":%s,"prio":%s,"custom":%s,"hdr":%s}\n' \
+        "$1" "$2" "$3" "$4" "$5" "$cflag" "$hflag"
+}
+
+# JSON list of known sources (for the WebUI): enabled ones first, in the order
+# service.sh tries them (prio 1..n), then the disabled ones. Data comes from
+# kb_known_sources in keybox_lib.sh. Custom sources also carry "custom":true
+# (deletable) and "hdr":true (has an auth header - the value is never printed).
+list_sources() {
+    command -v kb_known_sources >/dev/null 2>&1 || { echo "[]"; return; }
+    known="$(kb_known_sources)"
+    curs=" $(cur_sources | tr -s ' ') "
+    tab="$(printf '\t')"
+    {
+        n=0
+        for name in $(cur_sources); do
+            line="$(printf '%s\n' "$known" | awk -F'\t' -v n="$name" '$1==n{print; exit}')"
+            [ -n "$line" ] || continue
+            n=$((n+1))
+            label="$(printf '%s' "$line" | cut -f2)"; desc="$(printf '%s' "$line" | cut -f3)"
+            src_json "$name" "$label" "$desc" true "$n"
+        done
+        printf '%s\n' "$known" | while IFS="$tab" read -r name label desc; do
+            [ -n "$name" ] || continue
+            case "$curs" in *" $name "*) continue ;; esac
+            src_json "$name" "$label" "$desc" false 0
+        done
+    } | sed '1s/^,//' | tr -d '\n' | { printf '['; cat; printf ']\n'; }
+}
+
+# write SOURCES = the given source names, in the order given (this becomes
+# the try-order in service.sh)
+set_sources() {
+    [ $# -gt 0 ] || { echo "no sources given (at least one required)"; return 1; }
+    for nm in "$@"; do
+        case "$nm" in ''|*[!a-z0-9_-]*) echo "invalid source name: $nm"; return 1 ;; esac
+    done
+    val="$*"
+    if grep -q '^SOURCES=' "$CONFIG" 2>/dev/null; then
+        sed -i "s/^SOURCES=.*/SOURCES=\"$val\"/" "$CONFIG"
+    else
+        echo "SOURCES=\"$val\"" >> "$CONFIG"
+    fi
+    echo "Sources set to: $val"
+}
+
+# Field validation shared by add-source and test-url. Fields end up in a TAB
+# separated file, in JSON and in curl arguments, so keep them boring: no
+# whitespace/control chars, no quotes, no backslash/backtick.
+bad_chars() {
+    case "$1" in
+        *[[:space:]]*|*\"*|*\'*|*\\*|*\`*) return 0 ;;
+    esac
+    return 1
+}
+check_url() {
+    case "$1" in https://?*) ;; *) echo "URL must start with https://"; return 1 ;; esac
+    if bad_chars "$1"; then echo "URL contains spaces or quote characters"; return 1; fi
+    return 0
+}
+# header is optional: "Name: value" (the value may contain spaces, not quotes)
+check_header() {
+    [ -n "$1" ] || return 0
+    case "$1" in *[![:print:]]*) echo "header contains control characters"; return 1 ;; esac
+    case "$1" in *\"*|*\'*|*\\*|*\`*) echo "header contains quote characters"; return 1 ;; esac
+    printf '%s' "$1" | grep -qE '^[A-Za-z0-9-]+: [^[:space:]]' || { echo "header must look like 'Name: value'"; return 1; }
+    return 0
+}
+
+add_source() {
+    name="$1"; url="$2"; hdr="$3"
+    case "$name" in
+        ''|[!a-z0-9]*|*[!a-z0-9_-]*) echo "invalid name: use a-z, 0-9, - or _ (must start with a letter/digit)"; return 1 ;;
+    esac
+    [ "${#name}" -le 24 ] || { echo "name too long (max 24 characters)"; return 1; }
+    check_url "$url" || return 1
+    check_header "$hdr" || return 1
+    if kb_known_sources | cut -f1 | grep -qx "$name"; then echo "a source named '$name' already exists"; return 1; fi
+    [ "$(grep -c . "$CUSTOM_LIST" 2>/dev/null)" -lt 20 ] 2>/dev/null || [ ! -s "$CUSTOM_LIST" ] || { echo "too many custom sources (max 20)"; return 1; }
+    printf '%s\t%s\t%s\n' "$name" "$url" "$hdr" >> "$CUSTOM_LIST"
+    chmod 600 "$CUSTOM_LIST" 2>/dev/null   # may hold an API key in the header
+    # enable it right away, lowest priority
+    cur="$(cur_sources | tr -s ' ')"
+    set_sources $cur "$name" >/dev/null
+    echo "Added '$name' (enabled, tried last)."
+}
+
+remove_source() {
+    name="$1"
+    [ -s "$CUSTOM_LIST" ] && awk -F'\t' -v n="$name" '$1==n{f=1} END{exit !f}' "$CUSTOM_LIST" \
+        || { echo "'$name' is not a custom source"; return 1; }
+    rest=""
+    for x in $(cur_sources); do [ "$x" = "$name" ] || rest="$rest $x"; done
+    [ -n "$rest" ] || { echo "it's the only enabled source - enable another one first"; return 1; }
+    awk -F'\t' -v n="$name" '$1!=n' "$CUSTOM_LIST" > "$CUSTOM_LIST.tmp" && mv -f "$CUSTOM_LIST.tmp" "$CUSTOM_LIST"
+    chmod 600 "$CUSTOM_LIST" 2>/dev/null
+    set_sources $rest >/dev/null
+    echo "Removed '$name'."
+}
+
+# Dry run: fetch + decode + validate a candidate and report, without installing
+# anything. The candidate file (it holds a private key) is deleted right after.
+# $1 = mode (url|source) ; url mode: $2 url, $3 header ; source mode: $2 name
+test_candidate() {
+    mode="$1"
+    tmp="$DATA_DIR/test_candidate.xml"; rm -f "$tmp"
+    if [ "$mode" = url ]; then
+        check_url "$2" || return 1
+        check_header "$3" || return 1
+        KB_EXTRA_HEADER="$3"; kb_fetch_url "$2" "$tmp" test; got=$?; KB_EXTRA_HEADER=""
+    else
+        kb_fetch_source "$2" "$CUSTOM_URL" "$tmp"; got=$?
+    fi
+    if [ "$got" -ne 0 ] || [ ! -s "$tmp" ]; then
+        rm -f "$tmp"
+        echo "FAIL: nothing usable came back (bad URL/auth, or the source has nothing new). See autofetch.log."
+        return 1
+    fi
+    if ! kb_structural_ok "$tmp"; then
+        rm -f "$tmp"; echo "FAIL: downloaded, but it doesn't look like a keybox."; return 1
+    fi
+    ser="$(kb_leaf_serial "$tmp")"
+    cur="$(kb_leaf_serial "$TS_KEYBOX" 2>/dev/null)"
+    rm -f "$tmp"
+    [ -n "$ser" ] || { echo "FAIL: keybox found but the certificate serial is unreadable."; return 1; }
+    echo "keybox OK, serial $(printf '%s' "$ser" | cut -c1-10)..."
+    kb_refresh_crl >/dev/null 2>&1
+    if kb_is_revoked "$ser"; then echo "REVOKED in Google's list - useless."; return 1; fi
+    if [ -s "$CRL_CACHE" ]; then echo "not revoked."; else echo "(no CRL available, revocation not checked)"; fi
+    if [ -n "$cur" ] && [ "$ser" = "$cur" ]; then echo "same key as the active one (fine, but nothing to gain)."; fi
+    echo "USABLE."
 }
 
 # packages that commonly enforce Play Integrity -> "recommended" preset
@@ -163,6 +309,7 @@ status_json() {
     fi
     tc=0; [ -f "$TS_TARGET" ] && tc="$(grep -c . "$TS_TARGET")"
     pif="false"; [ -d "$PIF_DIR" ] && pif="true"
+    sc=0; sc="$(cur_sources | wc -w | tr -d ' ')"
     keyinfo="null"
     if command -v kb_private_status_extra >/dev/null 2>&1; then
         ke="$(kb_private_status_extra 2>/dev/null)"; [ -n "$ke" ] && keyinfo="$ke"
@@ -171,8 +318,8 @@ status_json() {
     if command -v kb_pif_days_left >/dev/null 2>&1; then
         pd="$(kb_pif_days_left 2>/dev/null)"; [ -n "$pd" ] && pifdays="$pd"
     fi
-    printf '{"interval":%s,"interval_h":"%s","keybox":"%s","serial":"%s","revoked":%s,"target_count":%s,"pif":%s,"renew_pif":%s,"key_info":%s,"pif_days_left":%s}\n' \
-        "$it" "$(human "$it")" "$kb" "$serial" "$rev" "$tc" "$pif" "${RENEW_PIF:-1}" "$keyinfo" "$pifdays"
+    printf '{"interval":%s,"interval_h":"%s","keybox":"%s","serial":"%s","revoked":%s,"target_count":%s,"pif":%s,"renew_pif":%s,"source_count":%s,"key_info":%s,"pif_days_left":%s}\n' \
+        "$it" "$(human "$it")" "$kb" "$serial" "$rev" "$tc" "$pif" "${RENEW_PIF:-1}" "$sc" "$keyinfo" "$pifdays"
 }
 
 # Opens the renewal page of a gated source (only if the private sources file
@@ -205,6 +352,7 @@ terminal_menu() {
         echo "  3) Check now"
         echo "  4) Status"
         echo "  5) Apply (renew + REBOOT)"
+        echo "  6) Keybox sources"
         echo "  0) Exit"; printf "  Choose: "
         if ! read c; then return; fi
         case "$c" in
@@ -213,6 +361,7 @@ terminal_menu() {
             3) check_now ;;
             4) status_json ;;
             5) apply_keybox ;;
+            6) list_sources ;;
             0|q|"") echo "  bye"; return ;;
             *) echo "  ?" ;;
         esac
@@ -225,10 +374,16 @@ case "${1:-}" in
     populate-target) populate_target ;;
     list-apps)       list_apps ;;
     set-target)      shift; set_target "$@" ;;
+    list-sources)    list_sources ;;
+    set-sources)     shift; set_sources "$@" ;;
+    add-source)      add_source "$2" "$3" "$4" ;;
+    remove-source)   remove_source "$2" ;;
+    test-url)        test_candidate url "$2" "$3" ;;
+    test-source)     test_candidate source "$2" ;;
     open-renew)      open_renew ;;
     check-now)       check_now ;;
     apply)           apply_keybox ;;
     webui)           launch_webui ;;
     "")              if [ -t 0 ]; then terminal_menu; else launch_webui; fi ;;
-    *)               echo "usage: action.sh [status-json|set-interval N|populate-target|list-apps|set-target P...|open-renew|check-now|apply|webui]" ;;
+    *)               echo "usage: action.sh [status-json|set-interval N|populate-target|list-apps|set-target P...|list-sources|set-sources S...|add-source NAME URL [HEADER]|remove-source NAME|test-url URL [HEADER]|test-source NAME|open-renew|check-now|apply|webui]" ;;
 esac

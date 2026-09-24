@@ -39,7 +39,8 @@ header .sub{font-size:12px;color:var(--muted);margin-top:2px}
 .btn:active{transform:scale(.985)}
 .hint{font-size:12px;color:var(--muted);margin-top:8px;line-height:1.5}
 #out{white-space:pre-wrap;font-family:ui-monospace,monospace;font-size:12px;color:var(--muted);
-  background:#0a0d0a;border:1px solid var(--line);border-radius:12px;padding:12px;margin-top:12px;min-height:20px;max-height:180px;overflow:auto}
+  background:#0a0d0a;border:1px solid var(--line);border-radius:12px;padding:12px;margin:0 0 14px;min-height:20px;max-height:120px;overflow:auto;
+  position:sticky;top:calc(env(safe-area-inset-top) + 8px);z-index:5}
 .modal{position:fixed;inset:0;background:rgba(0,0,0,.6);display:none;align-items:center;justify-content:center;padding:24px;z-index:9}
 .modal.show{display:flex}
 .modal .box{background:var(--card);border:1px solid var(--line);border-radius:18px;padding:20px;max-width:400px;width:100%}
@@ -60,6 +61,18 @@ header .sub{font-size:12px;color:var(--muted);margin-top:2px}
 .app .pk{flex:1;word-break:break-all;font-family:ui-monospace,monospace;font-size:12px}
 .app .rec{font-size:10px;font-weight:700;color:var(--accent);border:1px solid var(--accent);border-radius:6px;padding:1px 5px;flex:0 0 auto}
 .apps-list .count{color:var(--muted);font-size:12px;padding:8px 10px}
+.chip.src{flex:0 0 auto;min-width:0;padding:10px 14px;display:inline-flex;align-items:center;gap:8px}
+.chip.src .prio{background:var(--accent-d);color:var(--accent);border-radius:999px;font-size:11px;min-width:18px;height:18px;line-height:18px;padding:0 5px}
+.chip.src:not(.active) .prio{display:none}
+.chip.src .x{color:var(--muted);font-size:16px;line-height:1;padding:0 2px}
+.chip.src.active .x{color:var(--accent-d)}
+.form{display:none;margin-top:10px}
+.form.show{display:block}
+.field{display:block;width:100%;padding:11px 12px;margin-top:8px;border-radius:11px;border:1px solid var(--line);
+  background:#0a0d0a;color:var(--fg);font-size:14px;font-family:inherit}
+.field:focus{outline:none;border-color:var(--accent)}
+.form .actions{display:flex;gap:10px;margin-top:2px}
+.form .actions .btn{margin-top:10px}
 </style>
 </head>
 <body>
@@ -72,6 +85,8 @@ header .sub{font-size:12px;color:var(--muted);margin-top:2px}
     </div>
   </header>
 
+  <div id="out">ready.</div>
+
   <div class="card">
     <h2>Status</h2>
     <div class="row"><span class="k">Keybox</span><span class="v" id="s-keybox">…</span></div>
@@ -79,7 +94,10 @@ header .sub{font-size:12px;color:var(--muted);margin-top:2px}
     <div class="row"><span class="k">Serial</span><span class="v" id="s-serial" style="font-size:12px">…</span></div>
     <div class="row"><span class="k">PlayIntegrityFork</span><span class="v" id="s-pif">…</span></div>
     <div class="row"><span class="k">target.txt</span><span class="v" id="s-target">…</span></div>
+    <div class="row"><span class="k">Keybox sources</span><span class="v" id="s-sources">…</span></div>
+    <div class="row" id="s-key-row" style="display:none"><span class="k" id="s-key-label">API key</span><span class="v" id="s-key">…</span></div>
     <div class="row"><span class="k">Check interval</span><span class="v" id="s-int">…</span></div>
+    <button class="btn" id="renew-btn" style="display:none" onclick="openRenew()">Renew key…</button>
     <button class="btn" onclick="checkNow()">Check now</button>
   </div>
 
@@ -103,7 +121,22 @@ header .sub{font-size:12px;color:var(--muted);margin-top:2px}
     <div class="hint">Installs the fresh keybox, renews the PIF fingerprint, clears Play caches and reboots. You'll re-login to Play afterwards.</div>
   </div>
 
-  <div id="out">ready.</div>
+  <div class="card">
+    <h2>Keybox sources</h2>
+    <div class="chips" id="src-chips"><div class="hint" style="margin:0">loading…</div></div>
+    <div class="hint">Tried in numbered order when the active keybox is revoked. Tap to enable or disable; the order you enable them in is the priority.</div>
+    <button class="btn" id="add-toggle" onclick="toggleAdd()">Add a source…</button>
+    <div class="form" id="add-form">
+      <input class="field" id="ns-name" placeholder="name (a-z, 0-9, - or _)" autocapitalize="none" autocomplete="off" spellcheck="false" maxlength="24">
+      <input class="field" id="ns-url" placeholder="https://… (raw XML or base64 keybox)" inputmode="url" autocapitalize="none" autocomplete="off" spellcheck="false">
+      <input class="field" id="ns-hdr" placeholder="header, optional — e.g. X-API-Key: …" autocapitalize="none" autocomplete="off" spellcheck="false">
+      <div class="hint" style="margin-top:6px"><b>Test</b> downloads and validates the key without installing anything.</div>
+      <div class="actions">
+        <button class="btn" id="ns-test" onclick="testSource()">Test</button>
+        <button class="btn primary" onclick="addSource()">Add</button>
+      </div>
+    </div>
+  </div>
 </div>
 
 <div class="modal" id="apps-modal">
@@ -120,6 +153,17 @@ header .sub{font-size:12px;color:var(--muted);margin-top:2px}
     <div class="actions" style="margin-top:12px">
       <button class="btn" onclick="hideApps()">Cancel</button>
       <button class="btn primary" onclick="saveApps()">Save</button>
+    </div>
+  </div>
+</div>
+
+<div class="modal" id="del-modal">
+  <div class="box">
+    <h3>Remove source?</h3>
+    <p id="del-text">Remove this source?</p>
+    <div class="actions">
+      <button class="btn" onclick="hideDel()">Cancel</button>
+      <button class="btn danger" onclick="doDel()">Remove</button>
     </div>
   </div>
 </div>
@@ -160,8 +204,23 @@ async function refresh(){
   document.getElementById('s-pif').innerHTML = s.pif
       ? '<span class="pill ok">present</span>' : '<span class="pill warn">missing</span>';
   document.getElementById('s-target').textContent = s.target_count + ' apps';
+  document.getElementById('s-sources').textContent = s.source_count + ' active';
   document.getElementById('s-int').textContent = s.interval_h;
-  document.querySelectorAll('.chip').forEach(c=>c.classList.toggle('active', c.dataset.s==String(s.interval)));
+  const kRow = document.getElementById('s-key-row'), kBtn = document.getElementById('renew-btn'), ki = s.key_info;
+  if (!ki || ki.days === null || ki.days === undefined) {
+    kRow.style.display = 'none'; kBtn.style.display = 'none';
+  } else {
+    kRow.style.display = 'flex';
+    document.getElementById('s-key-label').textContent = ki.label || 'API key';
+    const d = ki.days;
+    document.getElementById('s-key').innerHTML = d < 0
+        ? '<span class="pill bad">expired ' + (-d) + 'd ago</span>'
+        : d <= 5 ? '<span class="pill warn">' + d + 'd left</span>'
+        : '<span class="pill ok">' + d + 'd left</span>';
+    kBtn.textContent = 'Renew ' + (ki.label || 'key') + '…';
+    kBtn.style.display = (ki.renew && d <= 5) ? 'block' : 'none';
+  }
+  document.querySelectorAll('#chips .chip').forEach(c=>c.classList.toggle('active', c.dataset.s==String(s.interval)));
 }
 
 document.getElementById('chips').addEventListener('click', async e=>{
@@ -172,6 +231,7 @@ document.getElementById('chips').addEventListener('click', async e=>{
 });
 
 async function checkNow(){ log('checking…'); const r = await exec(AC+" check-now"); log(r.stdout||r.stderr); refresh(); }
+async function openRenew(){ log('opening browser…'); await exec(AC+" open-renew"); }
 let APPS=[];
 async function openApps(){
   document.getElementById('apps-modal').classList.add('show');
@@ -200,13 +260,86 @@ async function saveApps(){
   const r=await exec(AC+" set-target "+pkgs.join(' '));
   log(r.stdout||r.stderr); refresh();
 }
+// ---- keybox sources (chips) --------------------------------------------------
+// Single-quote a value for the shell command line that ksu.exec runs.
+function q(v){ return "'" + String(v).replace(/'/g, "'\\''") + "'"; }
+function esc(v){ return String(v).replace(/[&<>"]/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])); }
+let SRC=[], ORDER=[], saveTimer=null, DEL=null;
+async function loadSources(){
+  const r=await exec(AC+" list-sources");
+  try{ SRC=JSON.parse(r.stdout); }catch(e){ document.getElementById('src-chips').innerHTML='<div class="hint" style="margin:0">failed: '+esc((r.stderr||r.stdout)||'no data')+'</div>'; return; }
+  ORDER = SRC.filter(x=>x.enabled).sort((a,b)=>a.prio-b.prio).map(x=>x.name);
+  renderSources();
+}
+function renderSources(){
+  const el=document.getElementById('src-chips');
+  if(!SRC.length){ el.innerHTML='<div class="hint" style="margin:0">no sources known</div>'; return; }
+  el.innerHTML = SRC.map((s,i)=>{
+    const p = ORDER.indexOf(s.name)+1;
+    return `<div class="chip src ${p?'active':''}" data-i="${i}" title="${esc(s.desc||'')}">`+
+           `<span class="prio">${p||''}</span><span>${esc(s.label)}</span>`+
+           (s.custom?`<span class="x" data-x="${i}" aria-label="remove">×</span>`:'')+`</div>`;
+  }).join('');
+}
+document.getElementById('src-chips').addEventListener('click', e=>{
+  const x = e.target.closest('.x');
+  if (x){ e.stopPropagation(); askDel(SRC[x.dataset.x]); return; }
+  const c = e.target.closest('.chip.src'); if(!c) return;
+  const name = SRC[c.dataset.i].name, at = ORDER.indexOf(name);
+  if (at >= 0){
+    if (ORDER.length === 1){ log('keep at least one source enabled.'); return; }
+    ORDER.splice(at,1);
+  } else ORDER.push(name);
+  renderSources();
+  clearTimeout(saveTimer);
+  saveTimer = setTimeout(async()=>{
+    const r = await exec(AC+" set-sources "+ORDER.join(' '));
+    log(r.stdout||r.stderr); refresh();
+  }, 350);
+});
+function toggleAdd(){
+  const f=document.getElementById('add-form'), on=!f.classList.contains('show');
+  f.classList.toggle('show',on);
+  document.getElementById('add-toggle').textContent = on ? 'Cancel' : 'Add a source…';
+}
+function srcFields(){
+  return { n:document.getElementById('ns-name').value.trim().toLowerCase(),
+           u:document.getElementById('ns-url').value.trim(),
+           h:document.getElementById('ns-hdr').value.trim() };
+}
+async function testSource(){
+  const f=srcFields();
+  if(!/^https:\/\/\S+$/.test(f.u)){ log('enter a valid https:// URL first.'); return; }
+  const b=document.getElementById('ns-test'); b.disabled=true; log('testing… (can take up to a minute)');
+  const r=await exec(AC+" test-url "+q(f.u)+(f.h?" "+q(f.h):""));
+  b.disabled=false; log(r.stdout||r.stderr);
+}
+async function addSource(){
+  const f=srcFields();
+  if(!f.n||!f.u){ log('name and URL are required.'); return; }
+  log('adding…');
+  const r=await exec(AC+" add-source "+q(f.n)+" "+q(f.u)+(f.h?" "+q(f.h):""));
+  log(r.stdout||r.stderr);
+  if(r.errno===0){
+    ['ns-name','ns-url','ns-hdr'].forEach(id=>document.getElementById(id).value='');
+    toggleAdd(); await loadSources(); refresh();
+  }
+}
+function askDel(s){ DEL=s; document.getElementById('del-text').textContent="Remove '"+s.label+"' from the list? It will stop being used."; document.getElementById('del-modal').classList.add('show'); }
+function hideDel(){ document.getElementById('del-modal').classList.remove('show'); DEL=null; }
+async function doDel(){
+  const s=DEL; hideDel(); if(!s) return;
+  log('removing…');
+  const r=await exec(AC+" remove-source "+q(s.name));
+  log(r.stdout||r.stderr); await loadSources(); refresh();
+}
 function askApply(){ document.getElementById('modal').classList.add('show'); }
 function hideModal(){ document.getElementById('modal').classList.remove('show'); }
 async function doApply(){ hideModal(); log('applying — the device will reboot…'); document.body.classList.add('spin'); await exec(AC+" apply"); }
 
 // bridge may attach a moment after load
 let tries=0;
-(function boot(){ if(typeof ksu!=='undefined' && ksu.exec){ refresh(); } else if(tries++<20){ setTimeout(boot,150); } else { refresh(); } })();
+(function boot(){ if(typeof ksu!=='undefined' && ksu.exec){ refresh(); loadSources(); } else if(tries++<20){ setTimeout(boot,150); } else { refresh(); loadSources(); } })();
 </script>
 </body>
 </html>

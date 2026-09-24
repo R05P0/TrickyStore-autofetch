@@ -44,6 +44,7 @@ Minimum required modules: **Tricky Store + PlayIntegrityFork + Zygisk**. The KOW
 - Config (persistent): `/data/adb/trickystore_autofetch/config.conf`
 - Log: `/data/adb/trickystore_autofetch/autofetch.log`
 - CRL cache: `/data/adb/trickystore_autofetch/crl.json`
+- User-added sources: `/data/adb/trickystore_autofetch/custom_sources.list` (mode 600, TAB separated `name url [header]`; the header may hold an API key)
 - Optional private sources: `/data/adb/trickystore_autofetch/sources_private.sh` (see "Private sources")
 - Notif icon (must be readable by SystemUI): `/sdcard/.trickystore_autofetch_icon.png`
 
@@ -54,6 +55,12 @@ action.sh set-interval N     # seconds (min 3600); loop re-reads config each cyc
 action.sh list-apps          # JSON [{pkg,rec,cur}] of user apps (rec=recommended, cur=in target)
 action.sh set-target P...    # write target.txt = Google core + given packages
 action.sh populate-target    # = set-target with ALL user apps
+action.sh list-sources       # JSON [{name,label,desc,enabled,prio,custom,hdr}] from kb_known_sources; enabled ones first in SOURCES order (prio 1..n), then the rest
+action.sh set-sources S...   # write SOURCES = given names, in the given priority order
+action.sh add-source N URL [HDR]  # save a custom source (https only, name a-z0-9_-, optional "Name: value" header) and enable it last
+action.sh remove-source N    # delete a custom source (refuses if it's the only enabled one)
+action.sh test-url URL [HDR] # dry run: fetch+decode+validate+CRL, prints a verdict, installs nothing
+action.sh test-source N      # same for an already known source
 action.sh open-renew         # opens a gated source's renewal page, if the private file provides one (runs as root - see GOTCHAS re: notification content-intents)
 action.sh check-now          # run one CRL revocation check
 action.sh apply              # install pending keybox + renew PIF + fix secpatch + pm clear + reboot
@@ -61,6 +68,7 @@ action.sh webui              # open WebUI in KsuWebUIStandalone / MMRL
 ```
 
 ### Adding a new keybox source
+- **From the WebUI (normal case):** "Keybox sources → Add a source" (name, https URL, optional header). Stored in `custom_sources.list`; decoding is auto-detected. Use **Test** first.
 - **Built-in (public) source:** in `scripts/keybox_lib.sh` add `URL_X=...`, a line in `kb_known_sources()` and a case in `kb_fetch_source()`. The WebUI and `action.sh list-sources`/`set-sources` are data-driven off `kb_known_sources`.
 - **Private source (must not be published):** see "Private sources" below.
 

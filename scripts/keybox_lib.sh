@@ -14,6 +14,9 @@
 LOG="$DATA_DIR/autofetch.log"
 PENDING="$DATA_DIR/pending_keybox.xml"
 CRL_CACHE="$DATA_DIR/crl.json"
+# User-added sources (WebUI "Add source"): one per line, TAB separated:
+#   name <TAB> https-url <TAB> optional "Header-Name: value" (e.g. an API key)
+CUSTOM_LIST="$DATA_DIR/custom_sources.list"
 # Optional private sources, deployed separately and NOT in the public repo/zip.
 PRIVATE_LIB="$DATA_DIR/sources_private.sh"
 # Notification icon must live where SystemUI (uid system) can read it; /data/adb
@@ -43,15 +46,27 @@ URL_DDEX="https://raw.githubusercontent.com/dare-devil-ex/keyboxxBot/main/keybox
 mkdir -p "$DATA_DIR" 2>/dev/null
 
 # Known sources for the WebUI's "Keybox sources" card: name, short label,
-# description (tab separated, one per line). Built-ins first, then whatever the
-# optional private file adds.
+# description (tab separated, one per line). Built-ins first, then the user's
+# custom sources, then whatever the optional private file adds.
 kb_known_sources() {
     printf '%s\t%s\t%s\n' \
         ddex    "DareDevilEx" "Different key (DeviceID wkaie), cert valid to 2030. Good fallback when others are revoked." \
         yurikey "Yurikey"     "The original default key (serial 3207...)."
     # Legacy single URL from config.conf (before the WebUI could add sources).
     [ -n "$CUSTOM_URL" ] && printf '%s\t%s\t%s\n' custom "Custom URL" "Legacy CUSTOM_URL from config.conf."
+    if [ -s "$CUSTOM_LIST" ]; then
+        while IFS="$(printf '\t')" read -r cn cu ch; do
+            [ -n "$cn" ] || continue
+            printf '%s\t%s\t%s\n' "$cn" "$cn" "$cu"
+        done < "$CUSTOM_LIST"
+    fi
     if command -v kb_private_known_sources >/dev/null 2>&1; then kb_private_known_sources; fi
+}
+
+# Print "url<TAB>header" for a custom source, nothing if there is no such source.
+kb_custom_get() {
+    [ -s "$CUSTOM_LIST" ] || return 0
+    awk -F'\t' -v n="$1" '$1==n{print $2 "\t" $3; exit}' "$CUSTOM_LIST"
 }
 
 kb_log() {
@@ -119,12 +134,15 @@ kb_fetch_source() {
         ddex)     url="$URL_DDEX" ;;
         custom)   url="$custom" ;;
         *)
-            # optional private sources (anything else is unknown)
+            # 1) optional private sources  2) user-added custom sources
             if command -v kb_private_fetch >/dev/null 2>&1; then
                 kb_private_fetch "$src" "$out"; prc=$?
                 [ "$prc" -eq 127 ] || return "$prc"
             fi
-            kb_log "unknown source '$src'"; return 1
+            entry="$(kb_custom_get "$src")"
+            if [ -z "$entry" ]; then kb_log "unknown source '$src'"; return 1; fi
+            url="$(printf '%s' "$entry" | cut -f1)"
+            KB_EXTRA_HEADER="$(printf '%s' "$entry" | cut -f2)"
             ;;
     esac
     kb_fetch_url "$url" "$out" "$src"

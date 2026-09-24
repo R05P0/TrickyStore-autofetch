@@ -25,7 +25,7 @@ Leaked hardware keyboxes are what let Tricky Store spoof DEVICE/STRONG Play Inte
 ## What it does
 
 - **Revocation-aware.** Extracts the leaf certificate serial from your active keybox and checks it against Google's official revocation list (`https://android.googleapis.com/attestation/status`). It only acts when your keybox is *actually* revoked — no pointless churn.
-- **Multi-source with failover.** `ddex` → `yurikey` → your own `custom` URL. Base64 or raw XML sources both work.
+- **Multi-source with failover.** Built-in `ddex` and `yurikey`, plus any number of your own https URLs added from the WebUI (optionally with an auth header), tried in the order you choose. Base64 or raw XML sources both work; a **Test** button checks a URL without installing anything.
 - **Validated before install.** Structural check + a re-check that the candidate isn't itself revoked and isn't the identical key you already have.
 - **Notifies you**, then a one-tap **Apply** clears the Play Integrity caches and reboots so the new key takes effect.
 - **Pure shell.** No compiled binary, ~4 small scripts. Uses `curl`, `base64`, `awk`, `xxd` — all present on modern Android.
@@ -61,8 +61,7 @@ It runs on boot and every ~6 h thereafter.
 **Or** edit `/data/adb/trickystore_autofetch/config.conf` directly (this path survives module updates):
 
 ```sh
-SOURCES="ddex yurikey"       # order to try; add 'custom'
-CUSTOM_URL=""                # your own keybox URL if using 'custom'
+SOURCES="ddex yurikey"       # order to try (easier from the WebUI: Keybox sources)
 INTERVAL=21600               # seconds between checks (min 3600)
 AUTO_INSTALL=1               # 1: auto-write a valid keybox on revocation; 0: only notify
 CRL_URL="https://android.googleapis.com/attestation/status"
