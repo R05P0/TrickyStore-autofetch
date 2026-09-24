@@ -6,12 +6,16 @@
 # files. We only ever write to $TS_KEYBOX. Touching /data/adb/modules/tricky_store
 # trips Tricky Store's integrity self-check and the engine refuses to start.
 
-TS_DIR="/data/adb/tricky_store"
-TS_KEYBOX="$TS_DIR/keybox.xml"
-DATA_DIR="/data/adb/trickystore_autofetch"
+# Paths can be pre-set by the caller (the test harness points them at a sandbox);
+# on the device nothing sets them, so the defaults apply.
+: "${TS_DIR:=/data/adb/tricky_store}"
+: "${TS_KEYBOX:=$TS_DIR/keybox.xml}"
+: "${DATA_DIR:=/data/adb/trickystore_autofetch}"
 LOG="$DATA_DIR/autofetch.log"
 PENDING="$DATA_DIR/pending_keybox.xml"
 CRL_CACHE="$DATA_DIR/crl.json"
+# Optional private sources, deployed separately and NOT in the public repo/zip.
+PRIVATE_LIB="$DATA_DIR/sources_private.sh"
 # Notification icon must live where SystemUI (uid system) can read it; /data/adb
 # is root-only, so we publish it to shared storage. service.sh keeps it in place.
 ICON_PUB="/sdcard/.trickystore_autofetch_icon.png"
@@ -26,25 +30,29 @@ WIDGET_STATUS="$DATA_DIR/status.json"
 # PlayIntegrityFix (autopif4.sh) stamps a "# Estimated Expiry: YYYY-MM-DD"
 # comment into custom.pif.prop when it picks a canary build. We read that
 # (never write it - PIF_DIR is someone else's module, same rule as TS_DIR).
-PIF_DIR="/data/adb/modules/playintegrityfix"
+: "${PIF_DIR:=/data/adb/modules/playintegrityfix}"
 PIF_PROP="$PIF_DIR/custom.pif.prop"
 
 # Source endpoints
 URL_YURIKEY="https://raw.githubusercontent.com/Yurii0307/yurikey/main/key"
 URL_DDEX="https://raw.githubusercontent.com/dare-devil-ex/keyboxxBot/main/keybox.xml"
-# KOWX712 upstream mirror: dead as of 2026-08 (serves 0 bytes). Kept as a known
-# name for back-compat; not in the default source list any more.
-URL_UPSTREAM="https://raw.githubusercontent.com/KOWX712/Tricky-Addon-Update-Target-List/keybox/.extra"
-# Specter keybox catalog (dpejoh) - the best-curated public source: a JSON catalog
-# with per-entry serial/revoked/timestamp + a "working"/"latest" summary. We monitor
-# it and grab the NEWEST non-revoked key when a genuinely new one is leaked.
-URL_SPECTER_CATALOG="https://rawbin.dpejoh.com/catalog"
-URL_SPECTER_KEY="https://rawbin.dpejoh.com/key"
 
 # Fallback if config.conf is missing/old (service.sh sources config which sets this)
 : "${CRL_URL:=https://android.googleapis.com/attestation/status}"
 
 mkdir -p "$DATA_DIR" 2>/dev/null
+
+# Known sources for the WebUI's "Keybox sources" card: name, short label,
+# description (tab separated, one per line). Built-ins first, then whatever the
+# optional private file adds.
+kb_known_sources() {
+    printf '%s\t%s\t%s\n' \
+        ddex    "DareDevilEx" "Different key (DeviceID wkaie), cert valid to 2030. Good fallback when others are revoked." \
+        yurikey "Yurikey"     "The original default key (serial 3207...)."
+    # Legacy single URL from config.conf (before the WebUI could add sources).
+    [ -n "$CUSTOM_URL" ] && printf '%s\t%s\t%s\n' custom "Custom URL" "Legacy CUSTOM_URL from config.conf."
+    if command -v kb_private_known_sources >/dev/null 2>&1; then kb_private_known_sources; fi
+}
 
 kb_log() {
     echo "[$(date '+%Y-%m-%d %H:%M:%S')] $*" >> "$LOG"
@@ -55,8 +63,11 @@ kb_log() {
 # --- network -----------------------------------------------------------------
 kb_download() {
     # $1 = url ; prints body to stdout
+    # If $KB_EXTRA_HEADER is set ("Name: value"), it's sent as an extra header -
+    # used for API-key-gated sources. Callers must clear it after use (see
+    # kb_fetch_source, which resets it at the top of every call).
     if command -v curl >/dev/null 2>&1; then
-        curl --connect-timeout 15 -m 60 -fsSL "$1" 2>/dev/null
+        curl --connect-timeout 15 -m 60 -fsSL ${KB_EXTRA_HEADER:+-H "$KB_EXTRA_HEADER"} "$1" 2>/dev/null
     else
         toybox wget -T 15 -qO- "$1" 2>/dev/null
     fi
@@ -66,8 +77,7 @@ kb_download() {
 # Sources encode the keybox differently:
 #   ddex     : already <AndroidAttestation> XML (raw)
 #   yurikey  : base64  -> XML
-#   upstream : hex     -> base64 -> XML
-#   specter  : shuffled-base64 -> XML (scrambled alphabet)
+#   others   : hex     -> base64 -> XML
 # Auto-detect by trying each and keeping whatever yields valid XML.
 kb_normalise() {
     # stdin = raw source body ; stdout = keybox XML ; returns non-zero on failure
@@ -86,63 +96,38 @@ kb_normalise() {
     dec2="$(printf '%s' "$b64" | base64 -d 2>/dev/null)"
     case "$dec2" in *"<AndroidAttestation"*) printf '%s' "$dec2"; return 0 ;; esac
 
-    # Specter shuffled-base64 -> XML (dpejoh's /key endpoint scrambles the b64 alphabet)
-    sdec="$(printf '%s' "$clean" \
-        | tr '1dgWnocayqxU3r6vA5lCIPYfHmkV08b4tz+KMsp2NQ9LRXihODwSj7BEFJ/ZuGTe' \
-             'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/' \
-        | base64 -d 2>/dev/null)"
-    case "$sdec" in *"<AndroidAttestation"*) printf '%s' "$sdec"; return 0 ;; esac
-
     return 1
 }
 
-# Parse Specter's JSON catalog (stdin) and print the NEWEST non-revoked entry as
-# "source\tversion\tserial\ttimestamp". Pure sed/grep/sort so it runs under toybox.
-kb_specter_pick_newest() {
-    sed 's/},{/}\n{/g' \
-      | grep '"revoked":false' \
-      | while IFS= read -r line; do
-            ser=$(printf '%s' "$line" | grep -oE '"serial":"[^"]*"'    | head -1 | sed 's/.*:"//;s/"$//')
-            src=$(printf '%s' "$line" | grep -oE '"source":"[^"]*"'    | head -1 | sed 's/.*:"//;s/"$//')
-            ver=$(printf '%s' "$line" | grep -oE '"version":"[^"]*"'   | head -1 | sed 's/.*:"//;s/"$//')
-            ts=$(printf  '%s' "$line" | grep -oE '"timestamp":"[^"]*"' | head -1 | sed 's/.*:"//;s/"$//')
-            [ -n "$ser" ] || continue
-            printf '%s\t%s\t%s\t%s\n' "$ts" "$src" "$ver" "$ser"
-        done \
-      | sort -r | head -1 \
-      | awk -F'\t' '{print $2"\t"$3"\t"$4"\t"$1}'
+# Download URL ($1), decode whatever encoding it uses, write the XML to $2.
+# $3 = label for the log. Uses $KB_EXTRA_HEADER if set.
+kb_fetch_url() {
+    url="$1"; out="$2"; label="${3:-source}"
+    [ -n "$url" ] || { kb_log "source '$label' has no url"; return 1; }
+    kb_download "$url" | kb_normalise > "$out" 2>/dev/null
+    [ -s "$out" ] || { kb_log "source '$label' returned nothing"; return 1; }
+    return 0
 }
 
 kb_fetch_source() {
-    # $1 = source name ; $2 = custom url (optional) ; writes XML to $3
+    # $1 = source name ; $2 = legacy CUSTOM_URL (optional) ; writes XML to $3
     src="$1"; custom="$2"; out="$3"
+    KB_EXTRA_HEADER=""    # reset every call - only sources with a header set it
+    url=""
     case "$src" in
         yurikey)  url="$URL_YURIKEY" ;;
         ddex)     url="$URL_DDEX" ;;
-        upstream) url="$URL_UPSTREAM" ;;
-        specter)
-            catj="$(kb_download "$URL_SPECTER_CATALOG")"
-            [ -n "$catj" ] || { kb_log "specter: empty catalog"; return 1; }
-            newest="$(printf '%s' "$catj" | kb_specter_pick_newest)"
-            [ -n "$newest" ] || { kb_log "specter: no non-revoked entry"; return 1; }
-            n_src="$(printf '%s' "$newest" | cut -f1)"
-            n_ver="$(printf '%s' "$newest" | cut -f2)"
-            n_ser="$(printf '%s' "$newest" | cut -f3)"
-            cur_ser="$(kb_leaf_serial "$TS_KEYBOX" 2>/dev/null)"
-            if [ -n "$cur_ser" ] && [ "$n_ser" = "$cur_ser" ]; then
-                kb_log "specter: newest non-revoked ($n_src/$n_ver serial=$n_ser) == current; nothing new"
-                return 1
-            fi
-            kb_log "specter: NEW candidate $n_src/$n_ver serial=$n_ser (current=$cur_ser)"
-            url="$URL_SPECTER_KEY/$n_src/$n_ver"
-            ;;
         custom)   url="$custom" ;;
-        *) kb_log "unknown source '$src'"; return 1 ;;
+        *)
+            # optional private sources (anything else is unknown)
+            if command -v kb_private_fetch >/dev/null 2>&1; then
+                kb_private_fetch "$src" "$out"; prc=$?
+                [ "$prc" -eq 127 ] || return "$prc"
+            fi
+            kb_log "unknown source '$src'"; return 1
+            ;;
     esac
-    [ -n "$url" ] || { kb_log "source '$src' has no url"; return 1; }
-    kb_download "$url" | kb_normalise > "$out" 2>/dev/null
-    [ -s "$out" ] || { kb_log "source '$src' returned nothing"; return 1; }
-    return 0
+    kb_fetch_url "$url" "$out" "$src"
 }
 
 # --- validation --------------------------------------------------------------
@@ -272,3 +257,10 @@ kb_install() {
     cp -f "$src" "$TS_KEYBOX" && chmod 644 "$TS_KEYBOX"
     kb_log "installed new keybox -> $TS_KEYBOX"
 }
+
+# --- optional private sources ---------------------------------------------------
+# Loaded last so it can rely on everything above. The `sh -n` guard means a
+# broken file is skipped instead of aborting the shell that sources us.
+if [ -f "$PRIVATE_LIB" ] && sh -n "$PRIVATE_LIB" 2>/dev/null; then
+    . "$PRIVATE_LIB"
+fi

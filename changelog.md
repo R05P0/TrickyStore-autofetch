@@ -1,4 +1,5 @@
 ## Unreleased
+- Sources are no longer hard-coded in the core: extra (private) sources plug in through optional hooks, so they can be kept out of the repo. `upstream` (dead since 2026-08) was removed.
 - The background loop now re-sources `keybox_lib.sh` every cycle (after a self-update the old functions kept running until reboot), and `check-now` refreshes `status.json` like the loop does.
 - `status.json` gains `candidate_ready` (true when a replacement keybox is waiting for Apply) and `pif_days_left`.
 

@@ -15,14 +15,17 @@
 # / security_patch.txt and our own config.
 
 MODID="trickystore_autofetch"
-DATA_DIR="/data/adb/$MODID"
+# Paths can be pre-set by the caller (the test harness uses a sandbox); on the
+# device nothing sets them, so the defaults apply.
+: "${DATA_DIR:=/data/adb/$MODID}"
+: "${TS_DIR:=/data/adb/tricky_store}"
 CONFIG="$DATA_DIR/config.conf"
-LIB="/data/adb/modules/$MODID/scripts/keybox_lib.sh"
-TS_KEYBOX="/data/adb/tricky_store/keybox.xml"
-TS_SECPATCH="/data/adb/tricky_store/security_patch.txt"
-TS_TARGET="/data/adb/tricky_store/target.txt"
+: "${LIB:=/data/adb/modules/$MODID/scripts/keybox_lib.sh}"
+: "${TS_KEYBOX:=$TS_DIR/keybox.xml}"
+TS_SECPATCH="$TS_DIR/security_patch.txt"
+TS_TARGET="$TS_DIR/target.txt"
 PENDING="$DATA_DIR/pending_keybox.xml"
-PIF_DIR="/data/adb/modules/playintegrityfix"
+: "${PIF_DIR:=/data/adb/modules/playintegrityfix}"
 ICON_PUB="/sdcard/.trickystore_autofetch_icon.png"
 
 [ -f "$CONFIG" ] && . "$CONFIG"
@@ -48,7 +51,7 @@ set_interval() {
 
 # --- target.txt auto-fill ----------------------------------------------------
 populate_target() {
-    [ -d /data/adb/tricky_store ] || { echo "Tricky Store not installed"; return 1; }
+    [ -d "$TS_DIR" ] || { echo "Tricky Store not installed"; return 1; }
     [ -f "$TS_TARGET" ] && cp -f "$TS_TARGET" "$TS_TARGET.bak" 2>/dev/null
     tmp="$DATA_DIR/target.tmp"
     { echo "com.google.android.gms!"; echo "com.android.vending!"; echo "com.google.android.gsf!"; } > "$tmp"
@@ -77,7 +80,7 @@ list_apps() {
 
 # write target.txt = Google core + the given packages
 set_target() {
-    [ -d /data/adb/tricky_store ] || { echo "Tricky Store not installed"; return 1; }
+    [ -d "$TS_DIR" ] || { echo "Tricky Store not installed"; return 1; }
     [ -f "$TS_TARGET" ] && cp -f "$TS_TARGET" "$TS_TARGET.bak" 2>/dev/null
     { echo "com.google.android.gms!"; echo "com.android.vending!"; echo "com.google.android.gsf!"
       for p in "$@"; do echo "$p"; done; } | grep -v '^[[:space:]]*$' | sort -u > "$TS_TARGET"
@@ -160,12 +163,23 @@ status_json() {
     fi
     tc=0; [ -f "$TS_TARGET" ] && tc="$(grep -c . "$TS_TARGET")"
     pif="false"; [ -d "$PIF_DIR" ] && pif="true"
+    keyinfo="null"
+    if command -v kb_private_status_extra >/dev/null 2>&1; then
+        ke="$(kb_private_status_extra 2>/dev/null)"; [ -n "$ke" ] && keyinfo="$ke"
+    fi
     pifdays="null"
     if command -v kb_pif_days_left >/dev/null 2>&1; then
         pd="$(kb_pif_days_left 2>/dev/null)"; [ -n "$pd" ] && pifdays="$pd"
     fi
-    printf '{"interval":%s,"interval_h":"%s","keybox":"%s","serial":"%s","revoked":%s,"target_count":%s,"pif":%s,"renew_pif":%s,"pif_days_left":%s}\n' \
-        "$it" "$(human "$it")" "$kb" "$serial" "$rev" "$tc" "$pif" "${RENEW_PIF:-1}" "$pifdays"
+    printf '{"interval":%s,"interval_h":"%s","keybox":"%s","serial":"%s","revoked":%s,"target_count":%s,"pif":%s,"renew_pif":%s,"key_info":%s,"pif_days_left":%s}\n' \
+        "$it" "$(human "$it")" "$kb" "$serial" "$rev" "$tc" "$pif" "${RENEW_PIF:-1}" "$keyinfo" "$pifdays"
+}
+
+# Opens the renewal page of a gated source (only if the private sources file
+# provides one). Runs as root: a direct `am start`, not a notification intent.
+open_renew() {
+    if command -v kb_private_renew >/dev/null 2>&1; then kb_private_renew
+    else echo "No renewal page configured."; fi
 }
 
 # --- WebUI launcher ----------------------------------------------------------
@@ -211,9 +225,10 @@ case "${1:-}" in
     populate-target) populate_target ;;
     list-apps)       list_apps ;;
     set-target)      shift; set_target "$@" ;;
+    open-renew)      open_renew ;;
     check-now)       check_now ;;
     apply)           apply_keybox ;;
     webui)           launch_webui ;;
     "")              if [ -t 0 ]; then terminal_menu; else launch_webui; fi ;;
-    *)               echo "usage: action.sh [status-json|set-interval N|populate-target|list-apps|set-target P...|check-now|apply|webui]" ;;
+    *)               echo "usage: action.sh [status-json|set-interval N|populate-target|list-apps|set-target P...|open-renew|check-now|apply|webui]" ;;
 esac

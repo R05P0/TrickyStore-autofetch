@@ -36,33 +36,47 @@ Minimum required modules: **Tricky Store + PlayIntegrityFork + Zygisk**. The KOW
 | `webroot/logo.png` | white-alpha keys, header logo |
 | `icon.png` | notification icon (white-alpha), published to `/sdcard/.trickystore_autofetch_icon.png` |
 | `config.conf` | seeded to `/data/adb/trickystore_autofetch/config.conf` (survives updates) |
+| `deploy-private.sh` | pushes `private/sources_private.sh` (gitignored, see "Private sources") to the device's DATA_DIR |
+| `build.sh` | builds the zip; aborts if a private source name is found in a file that would ship |
 | `uninstall.sh` | removes only our data dir; never touches keybox.xml |
 
 ## Runtime paths
 - Config (persistent): `/data/adb/trickystore_autofetch/config.conf`
 - Log: `/data/adb/trickystore_autofetch/autofetch.log`
 - CRL cache: `/data/adb/trickystore_autofetch/crl.json`
+- Optional private sources: `/data/adb/trickystore_autofetch/sources_private.sh` (see "Private sources")
 - Notif icon (must be readable by SystemUI): `/sdcard/.trickystore_autofetch_icon.png`
 
 ## action.sh subcommands (the WebUI's API)
 ```
-action.sh status-json        # JSON: interval, keybox, serial, revoked, target_count, pif
+action.sh status-json        # JSON: interval, keybox, serial, revoked, target_count, pif, source_count
 action.sh set-interval N     # seconds (min 3600); loop re-reads config each cycle, no reboot
 action.sh list-apps          # JSON [{pkg,rec,cur}] of user apps (rec=recommended, cur=in target)
 action.sh set-target P...    # write target.txt = Google core + given packages
 action.sh populate-target    # = set-target with ALL user apps
+action.sh open-renew         # opens a gated source's renewal page, if the private file provides one (runs as root - see GOTCHAS re: notification content-intents)
 action.sh check-now          # run one CRL revocation check
 action.sh apply              # install pending keybox + renew PIF + fix secpatch + pm clear + reboot
 action.sh webui              # open WebUI in KsuWebUIStandalone / MMRL
 ```
 
-## keybox_lib.sh functions
-`kb_fetch_source` (specter/ddex/yurikey/upstream/custom) → `kb_normalise` → `kb_structural_ok` → `kb_leaf_serial` → `kb_refresh_crl`/`kb_is_revoked` → `kb_install`. Notify via `kb_notify`.
+### Adding a new keybox source
+- **Built-in (public) source:** in `scripts/keybox_lib.sh` add `URL_X=...`, a line in `kb_known_sources()` and a case in `kb_fetch_source()`. The WebUI and `action.sh list-sources`/`set-sources` are data-driven off `kb_known_sources`.
+- **Private source (must not be published):** see "Private sources" below.
 
-- **Source encodings** (auto-detected by `kb_normalise`): raw XML | base64→XML (yurikey) | hex→base64→XML (upstream KOWX712 `keybox/.extra`) | **shuffled-base64→XML (specter: scrambled b64 alphabet, `/key/<source>/<version>`)**.
+## Private sources (not in the repo)
+Some sources must not be public. They live in `./private/` (**gitignored**, never zipped) and are deployed with `./deploy-private.sh` to `/data/adb/trickystore_autofetch/sources_private.sh`, which `keybox_lib.sh` sources if present (guarded by `sh -n`; without it the module just runs with the public sources). The core knows nothing about them except these optional hooks, all checked with `command -v`: `kb_private_known_sources`, `kb_private_fetch NAME OUT` (return 127 = not mine), `kb_private_cycle` (called every `service.sh` cycle), `kb_private_status_extra` (JSON for the WebUI status row: `{"label":..,"days":N,"renew":bool}`), `kb_private_renew`. Details live in `private/CLAUDE.private.md` if that folder exists on your machine.
+- **Never** put source names/URLs/keys in a public file: `build.sh` greps the shipping files and aborts the build if it finds any.
+- The private file lives in DATA_DIR on purpose, so a module self-update (which replaces the module dir) doesn't wipe it. `uninstall.sh` removes DATA_DIR, so redeploy after a reinstall.
+- Changing it needs no reboot: the loop re-sources `keybox_lib.sh` (and through it the private file) every cycle.
+
+## keybox_lib.sh functions
+`kb_fetch_source` (yurikey/ddex/legacy `custom`/private hook/`custom_sources.list`) → `kb_fetch_url` → `kb_normalise` → `kb_structural_ok` → `kb_leaf_serial` → `kb_refresh_crl`/`kb_is_revoked` → `kb_install`. Notify via `kb_notify`.
+
+- **Source encodings** (auto-detected by `kb_normalise`): raw XML | base64→XML (yurikey) | hex→base64→XML. A private source may bring its own decoder.
 - **Revocation**: extract the leaf cert serial (ASN.1/DER parsed in pure `awk`+`base64`+`xxd`, **no openssl on device**) and grep it in Google's CRL `https://android.googleapis.com/attestation/status`. NB: the public CRL doesn't list *every* dead key (Google also blocks server-side), so "not revoked" ≠ "passes integrity".
 - Public sources often serve the **same** leaked key under different labels; `kb_leaf_serial` is used to skip a candidate identical to the current key.
-- **specter** source = dpejoh's curated JSON catalog (`rawbin.dpejoh.com/catalog`): picks the NEWEST `revoked:false` entry; if it equals the current mounted serial it returns non-zero ("nothing new"), so it acts as a MONITOR that auto-adopts the next fresh leak. Key blob at `/key/<source>/<version>` is shuffled-base64 (alphabet in `kb_normalise`). NB: "not revoked" = passes Play Integrity, NOT necessarily tap-to-pay (Google's payment blocklist is stricter).
+- "Not revoked" = passes Play Integrity, NOT necessarily tap-to-pay (Google's payment blocklist is stricter).
 
 ## WebUI (webroot/)
 - Talks to root via the KSU WebUI bridge: `ksu.exec(cmd, '{}', callbackName)` where the callback gets `(errno, stdout, stderr)`. See the `exec()` wrapper in `index.html`.
@@ -70,6 +84,7 @@ action.sh webui              # open WebUI in KsuWebUIStandalone / MMRL
 - App selector: `list-apps` → checkboxes; presets Recommended/All/None; Save → `set-target`.
 
 ## GOTCHAS / traps we hit (don't relearn these)
+- **`action.sh` exists in TWO places, and the WebUI calls the one you're less likely to edit.** `customize.sh` copies `$MODPATH/action.sh` to `$DATA_DIR/action.sh` (`/data/adb/trickystore_autofetch/action.sh`) at install time "so it can be run manually". The WebUI's `AC` constant in `index.html` hardcodes that `$DATA_DIR` path, NOT `/data/adb/modules/trickystore_autofetch/action.sh`. If you deploy a changed `action.sh` live (adb push to the module dir, see cheatsheet below) without also copying it to `$DATA_DIR`, the WebUI keeps calling the stale copy — symptom: new UI elements render (HTML/JS reloaded fine) but their data comes back `undefined` or `cmd: usage: ...` (old subcommand missing). Fix/rule: after any `action.sh` edit, push it to BOTH paths. `scripts/keybox_lib.sh` doesn't have this problem — `action.sh`'s `LIB=` always points at the module-dir copy regardless of where `action.sh` itself runs from.
 - **PIF fresh reinstall loses `custom.pif.prop`** → runs with no fingerprint → BASIC fails. Fix: `sh /data/adb/modules/playintegrityfix/autopif4.sh` (canary Pixel fp is fine). Old fp backup was at `/data/adb/pif.json.old`.
 - **autopif writes a malformed `security_patch.txt`** for Tricky Store (`system=202607`). Always normalise all three lines to one valid `YYYY-MM-DD`. `action.sh`'s `fix_ts_secpatch` does this.
 - **Notifications must post as uid 2000** (`su -lp 2000 -c "cmd notification post ..."`). As root (uid 0) `cmd` accepts it but it never displays.
@@ -78,6 +93,8 @@ action.sh webui              # open WebUI in KsuWebUIStandalone / MMRL
 - **KsuWebUIStandalone caches the WebView** — after changing `webroot/`, `pm clear io.github.a13e300.ksuwebui` (or force-close) to see changes.
 - **ImageMagick `+level-colors X,X` destroys PNG alpha** (makes an opaque square). To recolor a silhouette keeping transparency: `magick in.png -channel RGB -fill '#RRGGBB' -colorize 100 +channel out.png`.
 - **zsh doesn't word-split unquoted vars** — `for f in a b c` works; `sed ... $FILES` doesn't.
+- **A shell-posted notification (`cmd notification post`) can't get a tap-to-open link.** Tried `-c "activity -a android.intent.action.VIEW -d <url>"` (as documented in `cmd notification post --help`): fails hard with `Permission Denial: getIntentSender() ... uid=2000 is not allowed to send as package android` — uid 2000 (shell) can't construct a PendingIntent for a Notification. Putting a raw URL in the notification text doesn't get auto-linkified either (this minimal template skips that). Working alternative: `am start -a android.intent.action.VIEW -d <url>` run directly as **root** (not inside a notification) works fine — that's what `action.sh open-renew` + the WebUI's "Renew" button do. Don't re-attempt the notification content-intent route.
+- **Editing `config.conf` live on the device: don't build the new content with nested `sed`/heredoc through `adb shell su -c "..."`.** Multiple shell layers (local shell → adb → su -c → remote sh) mangle quotes silently (e.g. a `sed` meant to add quotes around a value stripped them instead, producing `SOURCES=ddex yurikey` with no quotes — which breaks sourcing the config, since sh then tries to run `yurikey` as a command). Safe pattern: pull the file, edit it locally (a real editor/tool, not adb-remote sed), `sh -n -c '. file'` or eyeball it, then `adb push` + `su -c cp` it back into place — same as deploying scripts.
 
 - **The service.sh loop lives for the whole uptime, so what it has sourced is frozen.** `run_once()` now re-sources `scripts/keybox_lib.sh` every cycle (guarded by `sh -n`), so lib changes apply on the next cycle without a reboot. BUT `service.sh` itself (incl. `run_once`'s own body) is still read once: after changing `service.sh`, restart the loop once. Relaunch with `setsid /data/adb/magisk/busybox sh /data/adb/modules/trickystore_autofetch/service.sh </dev/null >/dev/null 2>&1 &` (absolute busybox path; bare `busybox` isn't always in `$PATH` under `su`). Don't kill it with `pkill -f trickystore_autofetch/service.sh` inside the same `su -c "..."` line: the pattern also matches your own shell's cmdline and kills it (`Terminated`) before the relaunch runs; kill by PID, or do it in two calls.
 - **`status.json` is a contract with the TrickyStoreCompanion widget** (`it.nacho.tsacompanion`, reads it via `su -c cat`). Fields: `status` (ok|revoked|missing|error), `serial_short`, `note`, `last_check`, `pif_days_left` (int or `null`), `candidate_ready` (bool, always present; true = a replacement keybox is staged and waits for Apply, only meaningful with `status=revoked`). Written by `kb_write_widget_status status serial note [candidate_ready]` from both `service.sh` and `action.sh check-now` (the widget's refresh button runs `check-now` then re-reads the file). Don't rename/remove fields without telling the widget side.
@@ -87,6 +104,8 @@ action.sh webui              # open WebUI in KsuWebUIStandalone / MMRL
 # deploy a changed script into the live module (adb can't write /data/adb directly)
 adb push action.sh /data/local/tmp/a.sh
 adb shell 'su -c "cp /data/local/tmp/a.sh /data/adb/modules/trickystore_autofetch/action.sh; chmod 755 $_"'
+# action.sh ALSO needs the DATA_DIR copy updated - see GOTCHAS above, the WebUI calls this one:
+adb shell 'su -c "cp /data/local/tmp/a.sh /data/adb/trickystore_autofetch/action.sh; chmod 755 $_"'
 
 sh -n action.sh                                    # syntax check (run on device: sh -n)
 adb shell 'su -c "sh /data/adb/trickystore_autofetch/action.sh status-json"'   # must be valid JSON

@@ -1,3 +1,6 @@
 test/
 *.zip
 *.log
+# private keybox sources: deployed to the device separately, never published
+private/
+CLAUDE.md

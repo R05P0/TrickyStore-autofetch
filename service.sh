@@ -39,7 +39,12 @@ run_once() {
     [ "$INTERVAL" -ge 3600 ] 2>/dev/null || INTERVAL=3600
     [ -n "$AUTO_INSTALL" ] || AUTO_INSTALL=1
 
-    # The PIF spoofed fingerprint's expiry is independent of
+    # Optional per-cycle hook from the private sources file (e.g. an expiring
+    # source API key). Runs regardless of keybox state - it's a separate concern
+    # from the active keybox being revoked or not.
+    if command -v kb_private_cycle >/dev/null 2>&1; then kb_private_cycle; fi
+
+    # Same reasoning: the PIF spoofed fingerprint's expiry is independent of
     # keybox state, so check it every cycle regardless of what happens below.
     kb_check_pif_expiry
 
