@@ -15,6 +15,19 @@ CRL_CACHE="$DATA_DIR/crl.json"
 # Notification icon must live where SystemUI (uid system) can read it; /data/adb
 # is root-only, so we publish it to shared storage. service.sh keeps it in place.
 ICON_PUB="/sdcard/.trickystore_autofetch_icon.png"
+# Small JSON status file for a companion widget app to read. Lives under our
+# own root-only data dir (not shared storage) - the widget app reads it via
+# `su -c cat ...` (root is already available on this device via Magisk), which
+# sidesteps Android 10+ scoped storage entirely. See WIDGET_APP_PACKAGE below:
+# if set, we also fire an explicit broadcast so the widget updates instantly
+# instead of waiting on Android's slow (min. ~30min) widget poll interval.
+WIDGET_STATUS="$DATA_DIR/status.json"
+: "${WIDGET_APP_PACKAGE:=}"
+# PlayIntegrityFix (autopif4.sh) stamps a "# Estimated Expiry: YYYY-MM-DD"
+# comment into custom.pif.prop when it picks a canary build. We read that
+# (never write it - PIF_DIR is someone else's module, same rule as TS_DIR).
+PIF_DIR="/data/adb/modules/playintegrityfix"
+PIF_PROP="$PIF_DIR/custom.pif.prop"
 
 # Source endpoints
 URL_YURIKEY="https://raw.githubusercontent.com/Yurii0307/yurikey/main/key"
@@ -185,13 +198,70 @@ kb_is_revoked() {
 
 # --- notification (best effort) ---------------------------------------------
 kb_notify() {
-    # $1 = title ; $2 = text
+    # $1 = title ; $2 = text ; $3 = optional tag suffix
     # Must post as the shell uid (2000 / com.android.shell). Posting as root
     # (uid 0) is accepted by 'cmd' but never actually registers or displays.
+    # A repeated call with the SAME tag silently updates the existing shade
+    # entry instead of posting a new one - easy to miss over a multi-day
+    # revoked-keybox reminder. Pass $3 (e.g. today's date) to force a fresh,
+    # separately-alerting notification while the underlying state persists.
     iflag=""
     [ -f "$ICON_PUB" ] && iflag="-i file://$ICON_PUB"
-    su -lp 2000 -c "cmd notification post $iflag -t '$1' trickystore_autofetch '$2'" >/dev/null 2>&1
+    tag="trickystore_autofetch"
+    [ -n "$3" ] && tag="${tag}_$3"
+    su -lp 2000 -c "cmd notification post $iflag -t '$1' $tag '$2'" >/dev/null 2>&1
     kb_log "NOTIFY: $1 - $2"
+}
+
+# --- PIF fingerprint expiry (best effort, on-device only) --------------------
+# Prints days left (may be negative) on stdout, returns 1 if unknown/not
+# applicable (PIF not installed, or its prop has no expiry stamp - e.g. a
+# manually-set non-canary fingerprint). No network involved, pure local read.
+kb_pif_days_left() {
+    [ -f "$PIF_PROP" ] || return 1
+    exp_date="$(grep -m1 '^# Estimated Expiry:' "$PIF_PROP" 2>/dev/null | sed 's/^# Estimated Expiry: *//')"
+    [ -n "$exp_date" ] || return 1
+    exp_epoch="$(date -d "$exp_date" +%s 2>/dev/null)"
+    [ -n "$exp_epoch" ] || return 1
+    echo $(( (exp_epoch - $(date +%s)) / 86400 ))
+}
+
+# Notify once per day (tag = today's
+# date) while within the warn window, and again (differently worded) once
+# it's actually expired. $1 = warn window in days (default 5).
+kb_check_pif_expiry() {
+    window="${1:-5}"
+    left_days="$(kb_pif_days_left)" || return 0
+    if [ "$left_days" -lt 0 ]; then
+        kb_notify "PIF fingerprint expired" "The spoofed build expired $(( -left_days )) day(s) ago. Play Integrity may start failing - run Apply (or enable RENEW_PIF) to fetch a fresh one." "$(date +%Y%m%d)"
+    elif [ "$left_days" -le "$window" ]; then
+        kb_notify "PIF fingerprint expiring soon" "The spoofed build expires in $left_days day(s). Run Apply soon to renew it." "$(date +%Y%m%d)"
+    fi
+}
+
+# --- widget status file (best effort) -----------------------------------------
+# Written after every check cycle for a home-screen widget (e.g. KWGT) to read.
+# $1 = status: ok | revoked | missing | error
+# $2 = keybox serial (may be empty)
+# $3 = short human note
+# $4 = candidate_ready: "true" when a replacement keybox is waiting for the user
+#      to tap Apply (only meaningful with status=revoked); anything else -> false.
+#      Always emitted, so the widget can rely on the field being present.
+kb_write_widget_status() {
+    st="$1"; ser="$2"; note="$3"
+    cand_ready="false"; [ "$4" = "true" ] && cand_ready="true"
+    ser_short=""
+    [ -n "$ser" ] && ser_short="$(printf '%s' "$ser" | cut -c1-10)"
+    pif_days="$(kb_pif_days_left 2>/dev/null)"
+    [ -n "$pif_days" ] || pif_days="null"
+    tmp="$WIDGET_STATUS.tmp"
+    printf '{"status":"%s","serial_short":"%s","note":"%s","last_check":"%s","pif_days_left":%s,"candidate_ready":%s}\n' \
+        "$st" "$ser_short" "$note" "$(date '+%d/%m %H:%M')" "$pif_days" "$cand_ready" > "$tmp" 2>/dev/null \
+        && mv -f "$tmp" "$WIDGET_STATUS" 2>/dev/null
+    # Explicit target (-p) required: implicit broadcasts to manifest receivers
+    # are blocked since Android 8 unless targeted at a specific package. No-ops
+    # quietly (2>/dev/null) if WIDGET_APP_PACKAGE is unset or app isn't installed.
+    [ -n "$WIDGET_APP_PACKAGE" ] && am broadcast -a "${WIDGET_APP_PACKAGE}.STATUS_UPDATED" -p "$WIDGET_APP_PACKAGE" >/dev/null 2>&1
 }
 
 # --- install -----------------------------------------------------------------

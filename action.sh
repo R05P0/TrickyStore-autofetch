@@ -121,11 +121,32 @@ apply_keybox() {
     sleep 3; reboot
 }
 
+# Also refreshes status.json (+ widget broadcast): the companion widget's refresh
+# button runs this and re-reads that file, so a check that didn't write it would
+# look like a no-op. Only checks - it never fetches/installs a replacement; that
+# stays the background loop's job. If the loop already staged one ($PENDING), we
+# report it as candidate_ready instead of clobbering that state with a bare "revoked".
 check_now() {
     command -v kb_refresh_crl >/dev/null 2>&1 || { echo "lib unavailable"; return 1; }
-    kb_refresh_crl || { echo "no network / CRL"; return 1; }
     cs="$(kb_leaf_serial "$TS_KEYBOX" 2>/dev/null)"
-    if [ -n "$cs" ] && kb_is_revoked "$cs"; then echo "Active keybox is REVOKED - open Apply."; else echo "Active keybox OK (not revoked)."; fi
+    if ! kb_refresh_crl; then
+        kb_write_widget_status "error" "$cs" "No network / CRL unavailable"
+        echo "no network / CRL"; return 1
+    fi
+    if [ -n "$cs" ] && kb_is_revoked "$cs"; then
+        if [ -f "$PENDING" ] && grep -q "<AndroidAttestation" "$PENDING" 2>/dev/null; then
+            kb_write_widget_status "revoked" "$cs" "Replacement ready, tap Apply" true
+        else
+            kb_write_widget_status "revoked" "$cs" "Revoked, no replacement staged yet"
+        fi
+        echo "Active keybox is REVOKED - open Apply."
+    elif [ -n "$cs" ]; then
+        kb_write_widget_status "ok" "$cs" "OK"
+        echo "Active keybox OK (not revoked)."
+    else
+        kb_write_widget_status "missing" "" "No active keybox installed"
+        echo "No active keybox installed."
+    fi
 }
 
 # --- status ------------------------------------------------------------------
@@ -139,8 +160,12 @@ status_json() {
     fi
     tc=0; [ -f "$TS_TARGET" ] && tc="$(grep -c . "$TS_TARGET")"
     pif="false"; [ -d "$PIF_DIR" ] && pif="true"
-    printf '{"interval":%s,"interval_h":"%s","keybox":"%s","serial":"%s","revoked":%s,"target_count":%s,"pif":%s,"renew_pif":%s}\n' \
-        "$it" "$(human "$it")" "$kb" "$serial" "$rev" "$tc" "$pif" "${RENEW_PIF:-1}"
+    pifdays="null"
+    if command -v kb_pif_days_left >/dev/null 2>&1; then
+        pd="$(kb_pif_days_left 2>/dev/null)"; [ -n "$pd" ] && pifdays="$pd"
+    fi
+    printf '{"interval":%s,"interval_h":"%s","keybox":"%s","serial":"%s","revoked":%s,"target_count":%s,"pif":%s,"renew_pif":%s,"pif_days_left":%s}\n' \
+        "$it" "$(human "$it")" "$kb" "$serial" "$rev" "$tc" "$pif" "${RENEW_PIF:-1}" "$pifdays"
 }
 
 # --- WebUI launcher ----------------------------------------------------------

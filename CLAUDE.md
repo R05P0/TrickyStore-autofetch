@@ -79,6 +79,9 @@ action.sh webui              # open WebUI in KsuWebUIStandalone / MMRL
 - **ImageMagick `+level-colors X,X` destroys PNG alpha** (makes an opaque square). To recolor a silhouette keeping transparency: `magick in.png -channel RGB -fill '#RRGGBB' -colorize 100 +channel out.png`.
 - **zsh doesn't word-split unquoted vars** — `for f in a b c` works; `sed ... $FILES` doesn't.
 
+- **The service.sh loop lives for the whole uptime, so what it has sourced is frozen.** `run_once()` now re-sources `scripts/keybox_lib.sh` every cycle (guarded by `sh -n`), so lib changes apply on the next cycle without a reboot. BUT `service.sh` itself (incl. `run_once`'s own body) is still read once: after changing `service.sh`, restart the loop once. Relaunch with `setsid /data/adb/magisk/busybox sh /data/adb/modules/trickystore_autofetch/service.sh </dev/null >/dev/null 2>&1 &` (absolute busybox path; bare `busybox` isn't always in `$PATH` under `su`). Don't kill it with `pkill -f trickystore_autofetch/service.sh` inside the same `su -c "..."` line: the pattern also matches your own shell's cmdline and kills it (`Terminated`) before the relaunch runs; kill by PID, or do it in two calls.
+- **`status.json` is a contract with the TrickyStoreCompanion widget** (`it.nacho.tsacompanion`, reads it via `su -c cat`). Fields: `status` (ok|revoked|missing|error), `serial_short`, `note`, `last_check`, `pif_days_left` (int or `null`), `candidate_ready` (bool, always present; true = a replacement keybox is staged and waits for Apply, only meaningful with `status=revoked`). Written by `kb_write_widget_status status serial note [candidate_ready]` from both `service.sh` and `action.sh check-now` (the widget's refresh button runs `check-now` then re-reads the file). Don't rename/remove fields without telling the widget side.
+
 ## Test / deploy cheatsheet (device over adb)
 ```
 # deploy a changed script into the live module (adb can't write /data/adb directly)
