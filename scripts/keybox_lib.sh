@@ -340,7 +340,18 @@ kb_write_widget_status() {
     # Explicit target (-p) required: implicit broadcasts to manifest receivers
     # are blocked since Android 8 unless targeted at a specific package. No-ops
     # quietly (2>/dev/null) if WIDGET_APP_PACKAGE is unset or app isn't installed.
-    [ -n "$WIDGET_APP_PACKAGE" ] && am broadcast -a "${WIDGET_APP_PACKAGE}.STATUS_UPDATED" -p "$WIDGET_APP_PACKAGE" >/dev/null 2>&1
+    kb_widget_broadcast "$WIDGET_APP_PACKAGE"
+}
+
+# Fire-and-forget: `am broadcast` waits until the receiver has finished. When the
+# widget app itself runs us (its refresh button / WebUI run check-now through its
+# root shell), its receiver needs that same shell to re-read status.json, so a
+# waiting broadcast deadlocks both until the broadcast times out. Backgrounded
+# (not `--async`, which older Android lacks) and with stdin from /dev/null so
+# `cmd` can't eat the caller's shell input.
+kb_widget_broadcast() {
+    [ -n "$1" ] || return 0
+    am broadcast -a "$1.STATUS_UPDATED" -p "$1" </dev/null >/dev/null 2>&1 &
 }
 
 # --- companion widget app ----------------------------------------------------
@@ -369,7 +380,7 @@ kb_companion_sync() {
     fi
     WIDGET_APP_PACKAGE="$COMPANION_PKG"
     kb_log "companion app installed - WIDGET_APP_PACKAGE set to $COMPANION_PKG"
-    am broadcast -a "${COMPANION_PKG}.STATUS_UPDATED" -p "$COMPANION_PKG" >/dev/null 2>&1
+    kb_widget_broadcast "$COMPANION_PKG"
     return 0
 }
 
