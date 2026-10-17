@@ -1,3 +1,10 @@
+## v1.4.0
+- **Keybox certificate expiry.** An expired leaf certificate fails DEVICE/STRONG even though Google's revocation list doesn't list it, so it used to read as "ok". The module now reads the leaf's expiry date locally every cycle (no network needed), warns you inside `EXPIRY_WARN_DAYS` (default 14), and treats an expired keybox like a revoked one: it fetches a replacement and skips candidates that are expired themselves.
+- **WebUI:** the *Validity* row now shows valid / expiring / expired / REVOKED, and a new *Cert. expiry* row shows the days left.
+- `status.json` (for widget apps): new `status` values `expiring` and `expired`, new field `keybox_days_left`.
+- **Fix:** the widget refresh broadcast no longer waits for the receiver. A widget app that runs `check-now` itself could deadlock with it until the broadcast timed out.
+- Groundwork for the TSA Companion widget app (`companion-sync`, `companion-dismiss`, `open-companion`): an installed companion is linked automatically; the WebUI won't advertise it until it has a public release.
+
 ## v1.3.0
 - **WebUI:** the log line moved to the top (sticky, so feedback stays visible), Status right below it, and a new **Keybox sources** card at the bottom: chips like the interval picker (tap to enable/disable, numbered by priority) and an **Add a source** form (name, https URL, optional header) with a **Test** button that validates a URL without installing anything. Custom sources can be removed with the × on their chip.
 - New `action.sh` commands: `add-source`, `remove-source`, `test-url`, `test-source`; `list-sources` now returns priority order.

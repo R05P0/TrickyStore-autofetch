@@ -340,8 +340,9 @@ status_json() {
     cinst=false; kb_pkg_installed "$COMPANION_PKG" && cinst=true
     clink=false; [ "$cinst" = true ] && [ "$WIDGET_APP_PACKAGE" = "$COMPANION_PKG" ] && clink=true
     cdis=false; [ -f "$COMPANION_DISMISSED" ] && cdis=true
-    printf '{"interval":%s,"interval_h":"%s","keybox":"%s","serial":"%s","revoked":%s,"keybox_days_left":%s,"keybox_expired":%s,"target_count":%s,"pif":%s,"renew_pif":%s,"source_count":%s,"key_info":%s,"pif_days_left":%s,"companion":{"installed":%s,"linked":%s,"dismissed":%s}}\n' \
-        "$it" "$(human "$it")" "$kb" "$serial" "$rev" "$kbdays" "$kbexp" "$tc" "$pif" "${RENEW_PIF:-1}" "$sc" "$keyinfo" "$pifdays" "$cinst" "$clink" "$cdis"
+    cpub=false; [ "$COMPANION_PUBLIC" = "1" ] && cpub=true
+    printf '{"interval":%s,"interval_h":"%s","keybox":"%s","serial":"%s","revoked":%s,"keybox_days_left":%s,"keybox_expired":%s,"target_count":%s,"pif":%s,"renew_pif":%s,"source_count":%s,"key_info":%s,"pif_days_left":%s,"companion":{"installed":%s,"linked":%s,"dismissed":%s,"public":%s}}\n' \
+        "$it" "$(human "$it")" "$kb" "$serial" "$rev" "$kbdays" "$kbexp" "$tc" "$pif" "${RENEW_PIF:-1}" "$sc" "$keyinfo" "$pifdays" "$cinst" "$clink" "$cdis" "$cpub"
 }
 
 # --- companion widget app ------------------------------------------------------
@@ -356,6 +357,7 @@ companion_sync() {
 companion_dismiss() { : > "$COMPANION_DISMISSED"; chmod 600 "$COMPANION_DISMISSED" 2>/dev/null; echo "Banner dismissed."; }
 # Fixed URL only (never an argument): opened as root, like the renew page.
 open_companion() {
+    [ "$COMPANION_PUBLIC" = "1" ] || { echo "The companion app isn't published yet."; return 1; }
     am start -a android.intent.action.VIEW -d "$COMPANION_URL" >/dev/null 2>&1
     echo "Opening the companion app page..."
 }

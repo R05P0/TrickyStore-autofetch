@@ -112,7 +112,7 @@ header .sub{font-size:12px;color:var(--muted);margin-top:2px}
     <div class="row"><span class="k">PlayIntegrityFork</span><span class="v" id="s-pif">…</span></div>
     <div class="row"><span class="k">target.txt</span><span class="v" id="s-target">…</span></div>
     <div class="row"><span class="k">Keybox sources</span><span class="v" id="s-sources">…</span></div>
-    <div class="row"><span class="k">Widget app</span><span class="v" id="s-companion">…</span></div>
+    <div class="row" id="s-companion-row"><span class="k">Widget app</span><span class="v" id="s-companion">…</span></div>
     <div class="row" id="s-key-row" style="display:none"><span class="k" id="s-key-label">API key</span><span class="v" id="s-key">…</span></div>
     <div class="row"><span class="k">Check interval</span><span class="v" id="s-int">…</span></div>
     <button class="btn" id="renew-btn" style="display:none" onclick="openRenew()">Renew key…</button>
@@ -238,12 +238,14 @@ async function refresh(){
       ? '<span class="pill ok">present</span>' : '<span class="pill warn">missing</span>';
   document.getElementById('s-target').textContent = s.target_count + ' apps';
   document.getElementById('s-sources').textContent = s.source_count + ' active';
-  const c = s.companion || {installed:false, linked:false, dismissed:false};
+  const c = s.companion || {installed:false, linked:false, dismissed:false, public:false};
   const cEl = document.getElementById('s-companion');
+  // Not installed: only worth a row/banner if there is a public release to get.
+  document.getElementById('s-companion-row').style.display = (c.installed || c.public) ? 'flex' : 'none';
   if (c.installed && c.linked) cEl.innerHTML = '<span class="pill ok">installed</span>';
   else if (c.installed) cEl.innerHTML = '<span class="pill warn">installed, not linked</span>';
   else cEl.innerHTML = '<span class="pill warn link" onclick="openCompanion()">not installed — get it</span>';
-  document.getElementById('companion-card').style.display = (!c.installed && !c.dismissed) ? 'block' : 'none';
+  document.getElementById('companion-card').style.display = (c.public && !c.installed && !c.dismissed) ? 'block' : 'none';
   if (c.installed && !c.linked && !SYNCED){ SYNCED = true; exec(AC+" companion-sync").then(refresh); }
   document.getElementById('s-int').textContent = s.interval_h;
   const kRow = document.getElementById('s-key-row'), kBtn = document.getElementById('renew-btn'), ki = s.key_info;

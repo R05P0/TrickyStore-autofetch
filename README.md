@@ -8,7 +8,7 @@ A tiny, dependency-free Magisk/KernelSU/APatch module that keeps [Tricky Store](
 
 On a schedule it asks Google whether your current keybox has been revoked. If it has, it fetches a fresh one from a list of public sources (with failover), validates it, installs it, and sends you a notification. One tap re-attests and reboots.
 
-[**Download latest release →**](https://github.com/R05P0/TrickyStore-autofetch/releases/latest/download/trickystore-autofetch-v1.0.0.zip)
+[**Download latest release →**](https://github.com/R05P0/TrickyStore-autofetch/releases/latest/download/TrickyStore-autofetch.zip)
 
 > ⚠️ **For educational purposes only.** Use at your own risk.
 
@@ -24,9 +24,9 @@ Leaked hardware keyboxes are what let Tricky Store spoof DEVICE/STRONG Play Inte
 
 ## What it does
 
-- **Revocation-aware.** Extracts the leaf certificate serial from your active keybox and checks it against Google's official revocation list (`https://android.googleapis.com/attestation/status`). It only acts when your keybox is *actually* revoked — no pointless churn.
+- **Revocation-aware.** Extracts the leaf certificate serial from your active keybox and checks it against Google's official revocation list (`https://android.googleapis.com/attestation/status`). It also reads the leaf certificate's expiry date: an expired certificate fails integrity even when Google hasn't revoked it, so it gets a warning ahead of time and is replaced like a revoked one. Otherwise it only acts when your keybox is *actually* dead — no pointless churn.
 - **Multi-source with failover.** Built-in `ddex` and `yurikey`, plus any number of your own https URLs added from the WebUI (optionally with an auth header), tried in the order you choose. Base64 or raw XML sources both work; a **Test** button checks a URL without installing anything.
-- **Validated before install.** Structural check + a re-check that the candidate isn't itself revoked and isn't the identical key you already have.
+- **Validated before install.** Structural check + a re-check that the candidate isn't itself revoked or expired and isn't the identical key you already have.
 - **Notifies you**, then a one-tap **Apply** clears the Play Integrity caches and reboots so the new key takes effect.
 - **Pure shell.** No compiled binary, ~4 small scripts. Uses `curl`, `base64`, `awk`, `xxd` — all present on modern Android.
 
@@ -64,6 +64,7 @@ It runs on boot and every ~6 h thereafter.
 SOURCES="ddex yurikey"       # order to try (easier from the WebUI: Keybox sources)
 INTERVAL=21600               # seconds between checks (min 3600)
 AUTO_INSTALL=1               # 1: auto-write a valid keybox on revocation; 0: only notify
+EXPIRY_WARN_DAYS=14          # warn this many days before the leaf certificate expires
 CRL_URL="https://android.googleapis.com/attestation/status"
 ```
 
@@ -101,6 +102,7 @@ When a new keybox is installed you get a notification. To make it effective you 
 | Structural sanity check | `kb_structural_ok` |
 | Leaf-serial extraction (ASN.1/DER, no openssl) | `kb_leaf_serial` |
 | Revocation check vs Google CRL | `kb_refresh_crl`, `kb_is_revoked` |
+| Leaf certificate expiry | `kb_leaf_notafter`, `kb_leaf_days_left`, `kb_check_keybox_expiry` |
 | Install to `keybox.xml` (only) | `kb_install` |
 | Force re-attest + reboot | `action.sh` |
 

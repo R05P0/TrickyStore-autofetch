@@ -360,6 +360,10 @@ kb_widget_broadcast() {
 # WIDGET_APP_PACKAGE at it so the refresh broadcast reaches it.
 : "${COMPANION_PKG:=dev.r05p0.tsacompanion}"
 : "${COMPANION_URL:=https://github.com/R05P0/TSA-companion/releases/latest}"
+# The companion has no public release yet: until it does, the WebUI doesn't
+# advertise it (no banner, no "get it" link - they'd lead to a 404). Linking an
+# already installed companion works either way. Flip to 1 once it's published.
+: "${COMPANION_PUBLIC:=0}"
 COMPANION_DISMISSED="$DATA_DIR/companion_dismissed"
 
 kb_pkg_installed() { [ -n "$1" ] && pm path "$1" >/dev/null 2>&1; }
