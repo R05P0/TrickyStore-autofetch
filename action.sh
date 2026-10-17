@@ -12,6 +12,7 @@
 #   action.sh apply           -> renew keybox+fingerprint, clear caches, reboot
 #   action.sh list-sources | set-sources S... | add-source NAME URL [HEADER]
 #   action.sh remove-source NAME | test-url URL [HEADER] | test-source NAME
+#   action.sh companion-sync | companion-dismiss | open-companion
 #
 # Nothing here touches Tricky Store's module files - only keybox.xml / target.txt
 # / security_patch.txt and our own config.
@@ -278,17 +279,30 @@ apply_keybox() {
 check_now() {
     command -v kb_refresh_crl >/dev/null 2>&1 || { echo "lib unavailable"; return 1; }
     cs="$(kb_leaf_serial "$TS_KEYBOX" 2>/dev/null)"
+    cd="$(kb_leaf_days_left "$TS_KEYBOX" 2>/dev/null)"
     if ! kb_refresh_crl; then
         kb_write_widget_status "error" "$cs" "No network / CRL unavailable"
         echo "no network / CRL"; return 1
     fi
+    staged=false
+    [ -f "$PENDING" ] && grep -q "<AndroidAttestation" "$PENDING" 2>/dev/null && staged=true
     if [ -n "$cs" ] && kb_is_revoked "$cs"; then
-        if [ -f "$PENDING" ] && grep -q "<AndroidAttestation" "$PENDING" 2>/dev/null; then
+        if [ "$staged" = true ]; then
             kb_write_widget_status "revoked" "$cs" "Replacement ready, tap Apply" true
         else
             kb_write_widget_status "revoked" "$cs" "Revoked, no replacement staged yet"
         fi
         echo "Active keybox is REVOKED - open Apply."
+    elif [ -n "$cs" ] && [ -n "$cd" ] && [ "$cd" -lt 0 ]; then
+        if [ "$staged" = true ]; then
+            kb_write_widget_status "expired" "$cs" "Replacement ready, tap Apply" true
+        else
+            kb_write_widget_status "expired" "$cs" "Certificate expired, no replacement staged yet"
+        fi
+        echo "Active keybox certificate EXPIRED $(( -cd )) day(s) ago - open Apply (auto-refreshes on the next cycle)."
+    elif [ -n "$cs" ] && [ -n "$cd" ] && [ "$cd" -le "${EXPIRY_WARN_DAYS:-14}" ]; then
+        kb_write_widget_status "expiring" "$cs" "Certificate expires in ${cd}d"
+        echo "Active keybox OK but certificate expires in $cd day(s)."
     elif [ -n "$cs" ]; then
         kb_write_widget_status "ok" "$cs" "OK"
         echo "Active keybox OK (not revoked)."
@@ -318,8 +332,32 @@ status_json() {
     if command -v kb_pif_days_left >/dev/null 2>&1; then
         pd="$(kb_pif_days_left 2>/dev/null)"; [ -n "$pd" ] && pifdays="$pd"
     fi
-    printf '{"interval":%s,"interval_h":"%s","keybox":"%s","serial":"%s","revoked":%s,"target_count":%s,"pif":%s,"renew_pif":%s,"source_count":%s,"key_info":%s,"pif_days_left":%s}\n' \
-        "$it" "$(human "$it")" "$kb" "$serial" "$rev" "$tc" "$pif" "${RENEW_PIF:-1}" "$sc" "$keyinfo" "$pifdays"
+    kbdays="null"; kbexp=false
+    if command -v kb_leaf_days_left >/dev/null 2>&1; then
+        kd="$(kb_leaf_days_left "$TS_KEYBOX" 2>/dev/null)"
+        if [ -n "$kd" ]; then kbdays="$kd"; [ "$kd" -lt 0 ] 2>/dev/null && kbexp=true; fi
+    fi
+    cinst=false; kb_pkg_installed "$COMPANION_PKG" && cinst=true
+    clink=false; [ "$cinst" = true ] && [ "$WIDGET_APP_PACKAGE" = "$COMPANION_PKG" ] && clink=true
+    cdis=false; [ -f "$COMPANION_DISMISSED" ] && cdis=true
+    printf '{"interval":%s,"interval_h":"%s","keybox":"%s","serial":"%s","revoked":%s,"keybox_days_left":%s,"keybox_expired":%s,"target_count":%s,"pif":%s,"renew_pif":%s,"source_count":%s,"key_info":%s,"pif_days_left":%s,"companion":{"installed":%s,"linked":%s,"dismissed":%s}}\n' \
+        "$it" "$(human "$it")" "$kb" "$serial" "$rev" "$kbdays" "$kbexp" "$tc" "$pif" "${RENEW_PIF:-1}" "$sc" "$keyinfo" "$pifdays" "$cinst" "$clink" "$cdis"
+}
+
+# --- companion widget app ------------------------------------------------------
+companion_sync() {
+    if kb_companion_sync; then
+        if [ "$WIDGET_APP_PACKAGE" = "$COMPANION_PKG" ]; then echo "Companion app linked ($COMPANION_PKG)."
+        else echo "Companion app installed; a different widget app is configured, left as is."; fi
+    else echo "Companion app is not installed."; return 1; fi
+}
+# "Don't show the install banner again" (a marker file - the WebView storage
+# can be cleared at any time, this survives).
+companion_dismiss() { : > "$COMPANION_DISMISSED"; chmod 600 "$COMPANION_DISMISSED" 2>/dev/null; echo "Banner dismissed."; }
+# Fixed URL only (never an argument): opened as root, like the renew page.
+open_companion() {
+    am start -a android.intent.action.VIEW -d "$COMPANION_URL" >/dev/null 2>&1
+    echo "Opening the companion app page..."
 }
 
 # Opens the renewal page of a gated source (only if the private sources file
@@ -381,9 +419,12 @@ case "${1:-}" in
     test-url)        test_candidate url "$2" "$3" ;;
     test-source)     test_candidate source "$2" ;;
     open-renew)      open_renew ;;
+    companion-sync)  companion_sync ;;
+    companion-dismiss) companion_dismiss ;;
+    open-companion)  open_companion ;;
     check-now)       check_now ;;
     apply)           apply_keybox ;;
     webui)           launch_webui ;;
     "")              if [ -t 0 ]; then terminal_menu; else launch_webui; fi ;;
-    *)               echo "usage: action.sh [status-json|set-interval N|populate-target|list-apps|set-target P...|list-sources|set-sources S...|add-source NAME URL [HEADER]|remove-source NAME|test-url URL [HEADER]|test-source NAME|open-renew|check-now|apply|webui]" ;;
+    *)               echo "usage: action.sh [status-json|set-interval N|populate-target|list-apps|set-target P...|list-sources|set-sources S...|add-source NAME URL [HEADER]|remove-source NAME|test-url URL [HEADER]|test-source NAME|companion-sync|companion-dismiss|open-companion|open-renew|check-now|apply|webui]" ;;
 esac

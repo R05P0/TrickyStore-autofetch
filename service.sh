@@ -44,9 +44,18 @@ run_once() {
     # from the active keybox being revoked or not.
     if command -v kb_private_cycle >/dev/null 2>&1; then kb_private_cycle; fi
 
+    # Link the companion widget app as soon as it shows up (no-op otherwise).
+    kb_companion_sync >/dev/null 2>&1
+
     # Same reasoning: the PIF spoofed fingerprint's expiry is independent of
     # keybox state, so check it every cycle regardless of what happens below.
     kb_check_pif_expiry
+
+    # Leaf-cert expiry is a pure local read (no network), so warn about it before
+    # the CRL/network gates below - that way you still get told even when offline.
+    # The actual rotation to a fresh keybox happens in the main block (it needs
+    # the CRL to vet the replacement).
+    kb_check_keybox_expiry "$TS_KEYBOX"
 
     if [ ! -d "$TS_DIR" ]; then
         kb_log "Tricky Store not installed ($TS_DIR missing) - skipping"
@@ -61,17 +70,32 @@ run_once() {
     fi
 
     cur_serial="$(kb_leaf_serial "$TS_KEYBOX" 2>/dev/null)"
+    cur_days="$(kb_leaf_days_left "$TS_KEYBOX" 2>/dev/null)"
+    reason=""
     if [ -n "$cur_serial" ] && kb_is_revoked "$cur_serial"; then
+        reason="revoked"
         kb_log "ACTIVE keybox serial $cur_serial is REVOKED - looking for a replacement"
         kb_write_widget_status "revoked" "$cur_serial" "Revoked, looking for a replacement"
+    elif [ -n "$cur_serial" ] && [ -n "$cur_days" ] && [ "$cur_days" -lt 0 ]; then
+        # Leaf cert past notAfter: as useless as revoked, even though the serial
+        # is NOT in the CRL. This is the case the old code silently called "ok".
+        reason="expired"
+        kb_log "ACTIVE keybox serial $cur_serial leaf cert EXPIRED (${cur_days}d) - looking for a replacement"
+        kb_write_widget_status "expired" "$cur_serial" "Certificate expired, looking for a replacement"
     elif [ -n "$cur_serial" ]; then
-        kb_log "active keybox serial $cur_serial OK (not in CRL)"
-        # Status widget covers the "all fine" case now - no notification for it
-        # (kept only for things that actually need your attention: revoked
-        # keybox, refresh failed, source API key expiring).
-        kb_write_widget_status "ok" "$cur_serial" "OK"
-        return   # current keybox is fine, nothing to do
+        # Valid and not revoked. Surface an approaching expiry in the widget
+        # (the notification was already posted by kb_check_keybox_expiry above);
+        # otherwise it's the plain "all fine" case - no notification for that.
+        if [ -n "$cur_days" ] && [ "$cur_days" -le "${EXPIRY_WARN_DAYS:-14}" ]; then
+            kb_log "active keybox serial $cur_serial OK but leaf cert expires in ${cur_days}d"
+            kb_write_widget_status "expiring" "$cur_serial" "Certificate expires in ${cur_days}d"
+        else
+            kb_log "active keybox serial $cur_serial OK (not in CRL)"
+            kb_write_widget_status "ok" "$cur_serial" "OK"
+        fi
+        return   # current keybox is still usable, nothing to fetch
     else
+        reason="missing"
         kb_log "no valid active keybox found - will try to install one"
         kb_write_widget_status "missing" "" "No active keybox installed"
     fi
@@ -88,25 +112,29 @@ run_once() {
         if kb_is_revoked "$cand_serial"; then
             kb_log "$src: candidate $cand_serial is also revoked - trying next"; continue
         fi
+        cand_days="$(kb_leaf_days_left "$tmp" 2>/dev/null)"
+        if [ -n "$cand_days" ] && [ "$cand_days" -lt 0 ]; then
+            kb_log "$src: candidate $cand_serial leaf cert is EXPIRED (${cand_days}d) - trying next"; continue
+        fi
         if [ "$cand_serial" = "$cur_serial" ]; then
             kb_log "$src: same key as current ($cand_serial) - trying next"; continue
         fi
-        # Found a valid, different, non-revoked keybox.
+        # Found a valid, different, non-revoked, non-expired keybox.
         if [ "$AUTO_INSTALL" = "1" ]; then
             kb_install "$tmp"
-            kb_notify "Keybox refreshed" "A fresh keybox ($src) was installed. Tap the module's Action to apply it (clears Play cache + reboots)."
-            kb_write_widget_status "revoked" "$cand_serial" "New keybox installed ($src), pending Apply" true
+            kb_notify "Keybox refreshed" "A fresh keybox ($src) was installed to replace the $reason one. Tap the module's Action to apply it (clears Play cache + reboots)."
+            kb_write_widget_status "$reason" "$cand_serial" "New keybox installed ($src), pending Apply" true
         else
             cp -f "$tmp" "$PENDING"
-            kb_notify "Keybox refresh available" "Active keybox is revoked. A valid one ($src) is ready. Tap the module's Action to install & apply." "$(date +%Y%m%d)"
-            kb_write_widget_status "revoked" "$cur_serial" "Replacement ($src) ready, tap Apply" true
+            kb_notify "Keybox refresh available" "Active keybox is $reason. A valid one ($src) is ready. Tap the module's Action to install & apply." "$(date +%Y%m%d)"
+            kb_write_widget_status "$reason" "$cur_serial" "Replacement ($src) ready, tap Apply" true
         fi
         rm -f "$tmp"
         return
     done
     rm -f "$tmp"
-    kb_notify "Keybox refresh failed" "Your keybox is revoked but no fresh valid keybox could be fetched. Try again later or add a custom source." "$(date +%Y%m%d)"
-    kb_write_widget_status "revoked" "$cur_serial" "No replacement found yet"
+    kb_notify "Keybox refresh failed" "Your keybox is $reason but no fresh valid keybox could be fetched. Try again later or add a custom source." "$(date +%Y%m%d)"
+    kb_write_widget_status "$reason" "$cur_serial" "No replacement found yet"
     kb_log "no valid replacement found from: $SOURCES"
 }
 

@@ -180,6 +180,43 @@ kb_leaf_serial() {
               sub(/^0+/,"",s); print tolower(s) }'
 }
 
+# Extract the leaf (first) certificate's notAfter date as "YYYY-MM-DD" (UTC).
+# Same DER walk as kb_leaf_serial, but continues past the serialNumber through
+# signature + issuer into the validity SEQUENCE and reads notAfter. Handles both
+# UTCTime (0x17, years < 2050) and GeneralizedTime (0x18). Date-only output on
+# purpose: it feeds `date -d`, exactly like kb_pif_days_left's expiry stamp, and
+# day granularity is all the warn/rotate logic needs. Prints nothing if the cert
+# can't be parsed (caller treats "unknown expiry" as "don't act on expiry").
+kb_leaf_notafter() {
+    # $1 = xml file ; prints YYYY-MM-DD or nothing
+    awk '/<Certificate format/{if(s){exit}s=1;next} /<\/Certificate>/{if(s)exit} s' "$1" \
+        | grep -vE 'BEGIN|END' | tr -d ' \t\r\n' | base64 -d 2>/dev/null | xxd -p 2>/dev/null | tr -d '\n' \
+        | awk '
+            function hv(c){return index("0123456789abcdef",tolower(c))-1}
+            function rb(){v=hv(substr(H,p,1))*16+hv(substr(H,p+1,1));p+=2;return v}
+            function rlen(){l=rb();if(l<128)return l;n=l-128;L=0;for(i=0;i<n;i++)L=L*256+rb();return L}
+            { H=$0; if(length(H)<8) exit; p=1
+              rb();rlen()                       # Certificate SEQUENCE
+              rb();rlen()                       # tbsCertificate SEQUENCE
+              t=rb()
+              if(t==160){vl=rlen();p+=vl*2;t=rb()}   # skip [0] EXPLICIT version
+              if(t!=2) exit                     # INTEGER serialNumber
+              sl=rlen(); p+=sl*2                 # skip serial value
+              t=rb(); al=rlen(); p+=al*2         # skip signature AlgorithmIdentifier
+              t=rb(); il=rlen(); p+=il*2         # skip issuer Name
+              t=rb(); if(t!=48) exit             # validity must be SEQUENCE (0x30)
+              rlen()                             # descend into validity (do not skip)
+              t=rb(); nbl=rlen(); p+=nbl*2       # skip notBefore Time
+              t=rb(); nal=rlen()                 # notAfter Time
+              if(t!=23 && t!=24) exit            # 0x17 UTCTime / 0x18 GeneralizedTime
+              d=""
+              for(i=0;i<nal;i++){b=rb(); if(b>=48 && b<=57) d=d sprintf("%d",b-48)}
+              if(t==23){ yy=substr(d,1,2)+0; pre=(yy>=50)?"19":"20"; yr=pre substr(d,1,2); r=substr(d,3) }
+              else { yr=substr(d,1,4); r=substr(d,5) }
+              if(length(yr)<4 || length(r)<4) exit
+              printf "%s-%s-%s\n", yr, substr(r,1,2), substr(r,3,2) }'
+}
+
 kb_refresh_crl() {
     # Download the CRL to cache; keep old cache on failure. Returns 0 if usable.
     tmp="$CRL_CACHE.tmp"
@@ -242,14 +279,51 @@ kb_check_pif_expiry() {
     fi
 }
 
+# --- keybox leaf-cert expiry (best effort, on-device only) -------------------
+# The leaf attestation cert has a fixed notAfter; once past it, DEVICE/STRONG
+# attestation fails even though the serial is NOT in Google's CRL (expiry !=
+# revocation - the old code only ever checked the CRL, so an expired-but-not-
+# revoked keybox read as "ok" and nothing warned). Pure local cert read, no
+# network - mirrors kb_pif_days_left so it can run even when the CRL is offline.
+# Prints days left (may be negative), returns 1 if the expiry can't be read.
+kb_leaf_days_left() {
+    # $1 = keybox xml file ; prints integer days (may be negative) or nothing
+    d="$(kb_leaf_notafter "$1")"
+    [ -n "$d" ] || return 1
+    exp_epoch="$(date -d "$d" +%s 2>/dev/null)"
+    [ -n "$exp_epoch" ] || return 1
+    echo $(( (exp_epoch - $(date +%s)) / 86400 ))
+}
+
+# Notify once per day (tag = today's date) while the active keybox's leaf cert
+# is within the warn window, and again (differently worded) once it has lapsed.
+# $1 = keybox xml (default $TS_KEYBOX) ; $2 = warn window in days (default
+# $EXPIRY_WARN_DAYS or 14). The actual rotation to a fresh keybox is driven by
+# service.sh's run_once (it needs the CRL to vet the replacement); this only
+# surfaces the warning, independent of network, exactly like the PIF check.
+kb_check_keybox_expiry() {
+    kbf="${1:-$TS_KEYBOX}"
+    window="${2:-${EXPIRY_WARN_DAYS:-14}}"
+    left_days="$(kb_leaf_days_left "$kbf")" || return 0
+    if [ "$left_days" -lt 0 ]; then
+        kb_notify "Keybox certificate expired" "The active keybox's attestation certificate expired $(( -left_days )) day(s) ago. DEVICE/STRONG attestation will fail until it's replaced - a fresh keybox is fetched automatically, or rotate one from the WebUI." "$(date +%Y%m%d)"
+    elif [ "$left_days" -le "$window" ]; then
+        kb_notify "Keybox certificate expiring soon" "The active keybox's attestation certificate expires in $left_days day(s). A fresh keybox will be fetched automatically when it lapses; you can rotate early from the WebUI." "$(date +%Y%m%d)"
+    fi
+}
+
 # --- widget status file (best effort) -----------------------------------------
 # Written after every check cycle for a home-screen widget (e.g. KWGT) to read.
-# $1 = status: ok | revoked | missing | error
+# $1 = status: ok | expiring | revoked | expired | missing | error
+#      (expiring = valid but inside the expiry warn window; expired = leaf cert
+#      past notAfter, as useless as revoked)
 # $2 = keybox serial (may be empty)
 # $3 = short human note
 # $4 = candidate_ready: "true" when a replacement keybox is waiting for the user
-#      to tap Apply (only meaningful with status=revoked); anything else -> false.
+#      to tap Apply (meaningful with status=revoked or expired); else -> false.
 #      Always emitted, so the widget can rely on the field being present.
+# keybox_days_left: int days until the leaf cert's notAfter (negative = expired),
+#      or null when it can't be read. Added field; older widgets ignore it.
 kb_write_widget_status() {
     st="$1"; ser="$2"; note="$3"
     cand_ready="false"; [ "$4" = "true" ] && cand_ready="true"
@@ -257,14 +331,46 @@ kb_write_widget_status() {
     [ -n "$ser" ] && ser_short="$(printf '%s' "$ser" | cut -c1-10)"
     pif_days="$(kb_pif_days_left 2>/dev/null)"
     [ -n "$pif_days" ] || pif_days="null"
+    kb_days="$(kb_leaf_days_left "$TS_KEYBOX" 2>/dev/null)"
+    [ -n "$kb_days" ] || kb_days="null"
     tmp="$WIDGET_STATUS.tmp"
-    printf '{"status":"%s","serial_short":"%s","note":"%s","last_check":"%s","pif_days_left":%s,"candidate_ready":%s}\n' \
-        "$st" "$ser_short" "$note" "$(date '+%d/%m %H:%M')" "$pif_days" "$cand_ready" > "$tmp" 2>/dev/null \
+    printf '{"status":"%s","serial_short":"%s","note":"%s","last_check":"%s","pif_days_left":%s,"keybox_days_left":%s,"candidate_ready":%s}\n' \
+        "$st" "$ser_short" "$note" "$(date '+%d/%m %H:%M')" "$pif_days" "$kb_days" "$cand_ready" > "$tmp" 2>/dev/null \
         && mv -f "$tmp" "$WIDGET_STATUS" 2>/dev/null
     # Explicit target (-p) required: implicit broadcasts to manifest receivers
     # are blocked since Android 8 unless targeted at a specific package. No-ops
     # quietly (2>/dev/null) if WIDGET_APP_PACKAGE is unset or app isn't installed.
     [ -n "$WIDGET_APP_PACKAGE" ] && am broadcast -a "${WIDGET_APP_PACKAGE}.STATUS_UPDATED" -p "$WIDGET_APP_PACKAGE" >/dev/null 2>&1
+}
+
+# --- companion widget app ----------------------------------------------------
+# A small home-screen widget app (TSA Companion) reads status.json. The module
+# invites the user to install it (WebUI banner) and, once it is installed, points
+# WIDGET_APP_PACKAGE at it so the refresh broadcast reaches it.
+: "${COMPANION_PKG:=dev.r05p0.tsacompanion}"
+: "${COMPANION_URL:=https://github.com/R05P0/TSA-companion/releases/latest}"
+COMPANION_DISMISSED="$DATA_DIR/companion_dismissed"
+
+kb_pkg_installed() { [ -n "$1" ] && pm path "$1" >/dev/null 2>&1; }
+
+# Set WIDGET_APP_PACKAGE to the companion when it is installed, unless a widget
+# app that is still installed is already configured (a custom/third-party one).
+# Returns 0 if the companion is installed (linked or left as configured), 1 if not.
+kb_companion_sync() {
+    case "$COMPANION_PKG" in ''|*[!a-zA-Z0-9._]*) return 1 ;; esac
+    kb_pkg_installed "$COMPANION_PKG" || return 1
+    [ "$WIDGET_APP_PACKAGE" = "$COMPANION_PKG" ] && return 0
+    if [ -n "$WIDGET_APP_PACKAGE" ] && kb_pkg_installed "$WIDGET_APP_PACKAGE"; then return 0; fi
+    cfg="$DATA_DIR/config.conf"
+    if grep -q '^WIDGET_APP_PACKAGE=' "$cfg" 2>/dev/null; then
+        sed -i "s/^WIDGET_APP_PACKAGE=.*/WIDGET_APP_PACKAGE=\"$COMPANION_PKG\"/" "$cfg"
+    else
+        echo "WIDGET_APP_PACKAGE=\"$COMPANION_PKG\"" >> "$cfg"
+    fi
+    WIDGET_APP_PACKAGE="$COMPANION_PKG"
+    kb_log "companion app installed - WIDGET_APP_PACKAGE set to $COMPANION_PKG"
+    am broadcast -a "${COMPANION_PKG}.STATUS_UPDATED" -p "$COMPANION_PKG" >/dev/null 2>&1
+    return 0
 }
 
 # --- install -----------------------------------------------------------------

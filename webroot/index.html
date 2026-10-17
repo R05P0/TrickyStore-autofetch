@@ -66,6 +66,12 @@ header .sub{font-size:12px;color:var(--muted);margin-top:2px}
 .chip.src:not(.active) .prio{display:none}
 .chip.src .x{color:var(--muted);font-size:16px;line-height:1;padding:0 2px}
 .chip.src.active .x{color:var(--accent-d)}
+.banner{border-color:var(--accent)}
+.banner .lead{font-size:14px;line-height:1.5;margin:0 0 4px}
+.banner .lead b{color:var(--accent)}
+.banner .actions{display:flex;gap:10px}
+.banner .actions .btn{margin-top:10px}
+.pill.link{cursor:pointer;text-decoration:underline}
 .form{display:none;margin-top:10px}
 .form.show{display:block}
 .field{display:block;width:100%;padding:11px 12px;margin-top:8px;border-radius:11px;border:1px solid var(--line);
@@ -87,14 +93,26 @@ header .sub{font-size:12px;color:var(--muted);margin-top:2px}
 
   <div id="out">ready.</div>
 
+  <div class="card banner" id="companion-card" style="display:none">
+    <h2>Widget app</h2>
+    <p class="lead"><b>Get the home-screen widget.</b> A small companion app shows the keybox and fingerprint status at a glance and refreshes on demand. It needs root and only reads this module's status file.</p>
+    <div class="hint" style="margin-top:0">Opens the releases page in your browser. Check the SHA-256 in the release notes before installing.</div>
+    <div class="actions">
+      <button class="btn" onclick="dismissCompanion()">Don't show again</button>
+      <button class="btn primary" onclick="openCompanion()">Get the app</button>
+    </div>
+  </div>
+
   <div class="card">
     <h2>Status</h2>
     <div class="row"><span class="k">Keybox</span><span class="v" id="s-keybox">…</span></div>
-    <div class="row"><span class="k">Revocation</span><span class="v" id="s-rev">…</span></div>
+    <div class="row"><span class="k">Validity</span><span class="v" id="s-rev">…</span></div>
+    <div class="row" id="s-exp-row" style="display:none"><span class="k">Cert. expiry</span><span class="v" id="s-exp">…</span></div>
     <div class="row"><span class="k">Serial</span><span class="v" id="s-serial" style="font-size:12px">…</span></div>
     <div class="row"><span class="k">PlayIntegrityFork</span><span class="v" id="s-pif">…</span></div>
     <div class="row"><span class="k">target.txt</span><span class="v" id="s-target">…</span></div>
     <div class="row"><span class="k">Keybox sources</span><span class="v" id="s-sources">…</span></div>
+    <div class="row"><span class="k">Widget app</span><span class="v" id="s-companion">…</span></div>
     <div class="row" id="s-key-row" style="display:none"><span class="k" id="s-key-label">API key</span><span class="v" id="s-key">…</span></div>
     <div class="row"><span class="k">Check interval</span><span class="v" id="s-int">…</span></div>
     <button class="btn" id="renew-btn" style="display:none" onclick="openRenew()">Renew key…</button>
@@ -124,7 +142,7 @@ header .sub{font-size:12px;color:var(--muted);margin-top:2px}
   <div class="card">
     <h2>Keybox sources</h2>
     <div class="chips" id="src-chips"><div class="hint" style="margin:0">loading…</div></div>
-    <div class="hint">Tried in numbered order when the active keybox is revoked. Tap to enable or disable; the order you enable them in is the priority.</div>
+    <div class="hint">Tried in numbered order when the active keybox is revoked or its certificate has expired. Tap to enable or disable; the order you enable them in is the priority.</div>
     <button class="btn" id="add-toggle" onclick="toggleAdd()">Add a source…</button>
     <div class="form" id="add-form">
       <input class="field" id="ns-name" placeholder="name (a-z, 0-9, - or _)" autocapitalize="none" autocomplete="off" spellcheck="false" maxlength="24">
@@ -198,13 +216,35 @@ async function refresh(){
   let s; try { s = JSON.parse(r.stdout); } catch(e){ log(r.stderr||r.stdout||'status failed'); return; }
   document.getElementById('s-keybox').innerHTML = s.keybox==='installed'
       ? '<span class="pill ok">installed</span>' : '<span class="pill bad">missing</span>';
+  const kexp = (typeof s.keybox_days_left === 'number') ? s.keybox_days_left : null;
+  const EXP_WARN = 14;   // mirrors EXPIRY_WARN_DAYS default (cosmetic threshold only)
+  const expired = s.keybox_expired || (kexp !== null && kexp < 0);
   document.getElementById('s-rev').innerHTML = s.revoked
-      ? '<span class="pill bad">REVOKED</span>' : '<span class="pill ok">valid</span>';
+      ? '<span class="pill bad">REVOKED</span>'
+      : expired ? '<span class="pill bad">expired</span>'
+      : (kexp !== null && kexp <= EXP_WARN) ? '<span class="pill warn">expiring</span>'
+      : '<span class="pill ok">valid</span>';
+  const expRow = document.getElementById('s-exp-row');
+  if (kexp === null) { expRow.style.display = 'none'; }
+  else {
+    expRow.style.display = 'flex';
+    document.getElementById('s-exp').innerHTML = kexp < 0
+        ? '<span class="pill bad">expired ' + (-kexp) + 'd ago</span>'
+        : kexp <= EXP_WARN ? '<span class="pill warn">' + kexp + 'd left</span>'
+        : '<span class="pill ok">' + kexp + 'd left</span>';
+  }
   document.getElementById('s-serial').textContent = s.serial ? (s.serial.slice(0,10)+'…') : '—';
   document.getElementById('s-pif').innerHTML = s.pif
       ? '<span class="pill ok">present</span>' : '<span class="pill warn">missing</span>';
   document.getElementById('s-target').textContent = s.target_count + ' apps';
   document.getElementById('s-sources').textContent = s.source_count + ' active';
+  const c = s.companion || {installed:false, linked:false, dismissed:false};
+  const cEl = document.getElementById('s-companion');
+  if (c.installed && c.linked) cEl.innerHTML = '<span class="pill ok">installed</span>';
+  else if (c.installed) cEl.innerHTML = '<span class="pill warn">installed, not linked</span>';
+  else cEl.innerHTML = '<span class="pill warn link" onclick="openCompanion()">not installed — get it</span>';
+  document.getElementById('companion-card').style.display = (!c.installed && !c.dismissed) ? 'block' : 'none';
+  if (c.installed && !c.linked && !SYNCED){ SYNCED = true; exec(AC+" companion-sync").then(refresh); }
   document.getElementById('s-int').textContent = s.interval_h;
   const kRow = document.getElementById('s-key-row'), kBtn = document.getElementById('renew-btn'), ki = s.key_info;
   if (!ki || ki.days === null || ki.days === undefined) {
@@ -231,6 +271,9 @@ document.getElementById('chips').addEventListener('click', async e=>{
 });
 
 async function checkNow(){ log('checking…'); const r = await exec(AC+" check-now"); log(r.stdout||r.stderr); refresh(); }
+let SYNCED = false;
+async function openCompanion(){ log('opening the browser…'); const r = await exec(AC+" open-companion"); log(r.stdout||r.stderr); }
+async function dismissCompanion(){ document.getElementById('companion-card').style.display='none'; await exec(AC+" companion-dismiss"); log('ok — the Widget app row in Status still has the link.'); refresh(); }
 async function openRenew(){ log('opening browser…'); await exec(AC+" open-renew"); }
 let APPS=[];
 async function openApps(){
