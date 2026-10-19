@@ -1,3 +1,6 @@
+## v1.4.1
+- **Fix: the background check looped every few seconds instead of every `INTERVAL`** when a widget app (e.g. the TSA Companion) is linked. Each run re-downloaded Google's revocation list, so the module could pull several GB a day over Wi-Fi *and mobile data* and drain the battery. Cause: since v1.4.0 the widget broadcast runs in the background, and when it exited during the loop's `sleep`, the signal cut the sleep short. The loop now waits for it before sleeping. Update and reboot (or restart the loop) to apply.
+
 ## v1.4.0
 - **Keybox certificate expiry.** An expired leaf certificate fails DEVICE/STRONG even though Google's revocation list doesn't list it, so it used to read as "ok". The module now reads the leaf's expiry date locally every cycle (no network needed), warns you inside `EXPIRY_WARN_DAYS` (default 14), and treats an expired keybox like a revoked one: it fetches a replacement and skips candidates that are expired themselves.
 - **WebUI:** the *Validity* row now shows valid / expiring / expired / REVOKED, and a new *Cert. expiry* row shows the days left.

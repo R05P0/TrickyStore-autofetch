@@ -144,6 +144,10 @@ run_once() {
     run_once
     . "$DATA_DIR/config.conf" 2>/dev/null
     [ -n "$INTERVAL" ] && [ "$INTERVAL" -ge 3600 ] 2>/dev/null || INTERVAL=21600
+    # Reap the backgrounded widget broadcasts first. busybox runs `sleep`
+    # in-process, so a child exiting mid-sleep (SIGCHLD) cuts it short: the loop
+    # then re-ran every few seconds, re-downloading the CRL (GBs of data/day).
+    wait
     sleep "$INTERVAL"
   done
 ) &
